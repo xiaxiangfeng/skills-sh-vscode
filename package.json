@@ -1,0 +1,162 @@
+{
+  "name": "skills-sh-vscode",
+  "displayName": "skills.sh - Skills Browser",
+  "description": "Browse, install, and manage skills.sh skills directly in VS Code",
+  "version": "0.1.0",
+  "publisher": "xiaxiangfeng",
+  "author": "xiaxiangfeng",
+  "license": "MIT",
+  "icon": "resources/icon.png",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/xiaxiangfeng/skills-sh-vscode"
+  },
+  "bugs": {
+    "url": "https://github.com/xiaxiangfeng/skills-sh-vscode/issues"
+  },
+  "homepage": "https://github.com/xiaxiangfeng/skills-sh-vscode#readme",
+  "keywords": [
+    "skills.sh",
+    "skills",
+    "ai",
+    "agent",
+    "vscode",
+    "extension"
+  ],
+  "engines": {
+    "vscode": "^1.85.0"
+  },
+  "categories": [
+    "Other"
+  ],
+  "activationEvents": [
+    "onView:skillsShView"
+  ],
+  "main": "./dist/extension.js",
+  "contributes": {
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "skillsSh",
+          "title": "skills.sh",
+          "icon": "resources/icon-activity.svg"
+        }
+      ]
+    },
+    "views": {
+      "skillsSh": [
+        {
+          "type": "webview",
+          "id": "skillsShView",
+          "name": "skills.sh"
+        }
+      ]
+    },
+    "commands": [
+      {
+        "command": "skillsSh.refresh",
+        "title": "Refresh skills.sh",
+        "icon": "$(refresh)"
+      },
+      {
+        "command": "skillsSh.installSkill",
+        "title": "Install skill by repo",
+        "icon": "$(cloud-download)"
+      }
+    ],
+    "menus": {
+      "view/title": [
+        {
+          "command": "skillsSh.refresh",
+          "when": "view == skillsShView",
+          "group": "navigation"
+        },
+        {
+          "command": "skillsSh.installSkill",
+          "when": "view == skillsShView",
+          "group": "navigation"
+        }
+      ]
+    },
+    "configuration": {
+      "title": "skills.sh",
+      "properties": {
+        "skillsSh.install.command": {
+          "type": "string",
+          "default": "npx",
+          "description": "Install command executable. Use together with skillsSh.install.args."
+        },
+        "skillsSh.install.args": {
+          "type": "array",
+          "default": [
+            "skills",
+            "add",
+            "{repo}"
+          ],
+          "description": "Install command arguments. Supports {repo} and {skill} placeholders. Arguments with empty placeholders are removed."
+        },
+        "skillsSh.install.skillFlag": {
+          "type": "string",
+          "default": "--skill",
+          "description": "Flag to append before the skill name when a specific skill is installed."
+        },
+        "skillsSh.install.cwd": {
+          "type": "string",
+          "default": "workspace",
+          "enum": [
+            "workspace",
+            "home",
+            "extension"
+          ],
+          "description": "Working directory for the install command."
+        },
+        "skillsSh.install.flow": {
+          "type": "string",
+          "default": "guided",
+          "enum": [
+            "cli",
+            "guided"
+          ],
+          "description": "Installation flow. 'cli' opens a terminal with the full skills CLI prompts; 'guided' uses VS Code pickers."
+        },
+        "skillsSh.marketplace.cacheMinutes": {
+          "type": "number",
+          "default": 5,
+          "description": "Cache duration for marketplace lists in minutes."
+        },
+        "skillsSh.webview.devServerUrl": {
+          "type": "string",
+          "default": "",
+          "description": "Vite dev server URL for webview hot reload (e.g. http://127.0.0.1:5173). Leave empty to use bundled assets."
+        }
+      }
+    }
+  },
+  "scripts": {
+    "build": "tsc -p ./",
+    "dev": "tsc -watch -p ./",
+    "typecheck": "tsc --noEmit",
+    "update": "vscode-ext-gen --output src/generated/meta.ts",
+    "vscode:prepublish": "npm run build:webview && npm run build",
+    "build:webview": "vite build --config webview/vite.config.ts",
+    "dev:webview": "vite --config webview/vite.config.ts",
+    "package": "npm run vscode:prepublish && npx @vscode/vsce package",
+    "package:pnpm": "pnpm install --node-linker=hoisted && npm run package",
+    "publish:vsce": "npm run vscode:prepublish && npx @vscode/vsce publish",
+    "publish:ovsx": "npm run vscode:prepublish && node scripts/publish-ovsx.js"
+  },
+  "devDependencies": {
+    "@types/node": "^20.10.0",
+    "@types/vscode": "^1.85.0",
+    "@vitejs/plugin-vue": "^5.2.0",
+    "@vscode/vsce": "^2.27.0",
+    "ovsx": "^0.10.4",
+    "typescript": "^5.3.0",
+    "vite": "^5.4.0",
+    "vscode-ext-gen": "^1.5.1"
+  },
+  "dependencies": {
+    "vue": "^3.4.0",
+    "yaml": "^2.3.4"
+  }
+}
