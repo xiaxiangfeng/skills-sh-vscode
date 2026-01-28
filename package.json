@@ -2,7 +2,7 @@
   "name": "skills-sh-vscode",
   "displayName": "skills.sh - Skills Browser",
   "description": "Browse, install, and manage skills.sh skills directly in VS Code",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "publisher": "xiaxiangfeng",
   "author": "xiaxiangfeng",
   "license": "MIT",

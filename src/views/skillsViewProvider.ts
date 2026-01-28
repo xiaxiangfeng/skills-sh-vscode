@@ -422,6 +422,10 @@ export class SkillsViewProvider implements vscode.WebviewViewProvider {
   }
 
   private getDevServerUrl(): string | undefined {
+    if (this.context.extensionMode !== vscode.ExtensionMode.Development) {
+      return undefined;
+    }
+
     const value = vscode.workspace
       .getConfiguration('skillsSh')
       .get<string>('webview.devServerUrl', '')
