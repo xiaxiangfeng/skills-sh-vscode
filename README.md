@@ -3,6 +3,8 @@
 Browse, search, and install skills from skills.sh directly inside VS Code.  
 This extension provides a webview UI with tabs for All Time / Trending / Hot / Installed and a guided install flow that mirrors the `npx skills add` experience.
 
+Chinese README: README.zh-CN.md
+
 ## Features
 - Browse skills.sh lists: **All Time**, **Trending (24h)**, **Hot**
 - Search skills via `skills.sh/api/search`
