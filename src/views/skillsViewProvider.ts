@@ -102,7 +102,9 @@ export class SkillsViewProvider implements vscode.WebviewViewProvider {
           }
           break;
         case 'openUrl':
-          vscode.commands.executeCommand('simpleBrowser.show', message.url);
+          if (message.url) {
+            vscode.env.openExternal(vscode.Uri.parse(message.url));
+          }
           break;
         default:
           break;

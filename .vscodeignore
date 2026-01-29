@@ -1,0 +1,15 @@
+.git/**
+.github/**
+.vscode/**
+.vscode-test/**
+node_modules/**
+!node_modules/yaml/**
+src/**
+webview/**
+scripts/**
+**/*.map
+pnpm-lock.yaml
+tsconfig.json
+tsdown.config.*
+wechat-post.md
+*.vsix
