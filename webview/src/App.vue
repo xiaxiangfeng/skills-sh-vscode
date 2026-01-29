@@ -1,9 +1,7 @@
 <template>
   <div class="app">
     <div class="app-header">
-      <div class="search-box">
-        <input v-model="searchQuery" type="text" placeholder="Search skills..." />
-      </div>
+      <SearchBar v-model="searchQuery" />
       <div class="tabs">
         <button
           v-for="tab in tabs"
@@ -18,6 +16,7 @@
       </div>
     </div>
 
+    <!-- Marketplace Panels -->
     <div class="panel" v-show="activeTab !== 'installed'">
       <div v-if="marketplaceView.mode === 'loading'" class="loading">
         {{ marketplaceView.message }}
@@ -30,34 +29,27 @@
       <div v-else-if="marketplaceView.mode === 'empty'" class="empty-state">
         {{ marketplaceView.message }}
       </div>
-      <div v-else class="marketplace-list">
-        <div class="marketplace-disclaimer">
-          <span v-if="marketplaceView.header">{{ marketplaceView.header }} - </span>
-          Data provided by <a href="#" class="disclaimer-link" @click.prevent="openUrl('https://skills.sh')">skills.sh</a>
-        </div>
-        <div
-          v-for="(skill, index) in marketplaceView.items"
-          :key="skill.repo + '/' + skill.name"
-          class="list-item"
-        >
-          <div class="item-content">
-            <div class="item-title title-link" @click="openUrl(getSkillUrl(skill))">{{ skill.name }}</div>
-            <div class="item-subtitle">{{ skill.repo }}</div>
-          </div>
-          <div class="item-actions">
-            <span class="item-meta-top">#{{ index + 1 }} - {{ skill.installs || 'N/A' }}</span>
-            <button
-              class="install-btn"
-              :class="isInstalled(skill.name) ? 'secondary' : 'primary'"
-              @click="installSkill(skill.repo, skill.name)"
-            >
-              {{ isInstalled(skill.name) ? 'Reinstall' : 'Install' }}
-            </button>
-          </div>
-        </div>
-      </div>
+      
+      <SkillList
+        v-else
+        :items="marketplaceView.items"
+        :header="marketplaceView.header"
+        variant="marketplace"
+        @click-item="onMarketplaceItemClick"
+      >
+        <template #actions="{ item }">
+          <button
+            class="install-btn"
+            :class="isInstalled(item.name) ? 'secondary' : 'primary'"
+            @click.stop="installSkill(item.repo, item.name)"
+          >
+            {{ isInstalled(item.name) ? 'Reinstall' : 'Install' }}
+          </button>
+        </template>
+      </SkillList>
     </div>
 
+    <!-- Installed Panel -->
     <div class="panel" v-show="activeTab === 'installed'">
       <div class="toolbar">
         <label class="toolbar-label" for="installed-sort">Sort</label>
@@ -70,62 +62,25 @@
       <div id="installed-list">
         <div v-if="installedEmptyMessage" class="empty-state">{{ installedEmptyMessage }}</div>
 
-        <div v-else-if="installedSort === 'time'">
-          <div v-for="skill in installedByTime" :key="skill.path" class="list-item">
-            <div class="item-content">
-              <div class="item-title title-link" @click="openSkill(skill.path)">{{ skill.name }}</div>
-              <div class="item-subtitle">{{ buildInstalledSubtitle(skill) }}</div>
-            </div>
-            <div class="item-actions">
-              <span class="item-meta-top">{{ formatDate(skill.updatedAt) }}</span>
-              <div class="item-buttons">
-                <button
-                  v-if="getMarketplaceMatch(skill.name)"
-                  class="secondary install-btn"
-                  @click="installSkill(getMarketplaceMatch(skill.name)?.repo || '', skill.name)"
-                >
-                  Reinstall
-                </button>
-                <button class="secondary delete-btn" @click="deleteSkill(skill)">Remove</button>
-              </div>
-            </div>
-          </div>
-        </div>
-
-        <div v-else>
-          <div v-for="group in installedGroups" :key="group.key" class="installed-group">
-            <div
-              class="list-header"
-              :class="{ collapsed: collapsedGroups.has(group.key) }"
-              @click="toggleGroup(group.key)"
+        <SkillList
+          v-else
+          :items="installedSort === 'time' ? installedByTime : undefined"
+          :groups="installedSort === 'type' ? installedGroups : undefined"
+          variant="installed"
+          :itemMapper="installedItemMapper"
+          @click-item="onInstalledItemClick"
+        >
+          <template #actions="{ item }">
+            <button
+              v-if="getMarketplaceMatch(item.name)"
+              class="secondary install-btn"
+              @click.stop="installSkill(getMarketplaceMatch(item.name)?.repo || '', item.name)"
             >
-              <span class="arrow"></span>
-              <span>{{ group.label }}</span>
-              <span class="badge">{{ group.skills.length }}</span>
-            </div>
-            <div class="list-content" v-show="!collapsedGroups.has(group.key)">
-              <div v-for="skill in group.skills" :key="skill.path" class="list-item child-item">
-                <div class="item-content">
-                  <div class="item-title title-link" @click="openSkill(skill.path)">{{ skill.name }}</div>
-                  <div class="item-subtitle">{{ skill.description || 'No description' }}</div>
-                </div>
-                <div class="item-actions">
-                  <span class="item-meta-top">{{ formatDate(skill.updatedAt) }}</span>
-                  <div class="item-buttons">
-                    <button
-                      v-if="getMarketplaceMatch(skill.name)"
-                      class="secondary install-btn"
-                      @click="installSkill(getMarketplaceMatch(skill.name)?.repo || '', skill.name)"
-                    >
-                      Reinstall
-                    </button>
-                    <button class="secondary delete-btn" @click="deleteSkill(skill)">Remove</button>
-                  </div>
-                </div>
-              </div>
-            </div>
-          </div>
-        </div>
+              Reinstall
+            </button>
+            <button class="secondary delete-btn" @click.stop="deleteSkill(item)">Remove</button>
+          </template>
+        </SkillList>
       </div>
     </div>
   </div>
@@ -134,6 +89,8 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import { vscode } from './vscode';
+import SearchBar from './components/SearchBar.vue';
+import SkillList from './components/SkillList.vue';
 import {
   ActiveTab,
   AgentDefinition,
@@ -158,7 +115,6 @@ if (!['type', 'time'].includes(installedSort.value)) {
 }
 
 const state = ref<WebviewState>(createEmptyState());
-const collapsedGroups = ref<Set<string>>(new Set());
 let searchTimer: number | undefined;
 
 const agentDefinitions = computed<AgentDefinition[]>(() => state.value.agents || []);
@@ -327,16 +283,6 @@ function setActiveTab(tab: ActiveTab) {
   activeTab.value = tab;
 }
 
-function toggleGroup(key: string) {
-  const next = new Set(collapsedGroups.value);
-  if (next.has(key)) {
-    next.delete(key);
-  } else {
-    next.add(key);
-  }
-  collapsedGroups.value = next;
-}
-
 function formatCount(value?: number) {
   if (typeof value !== 'number' || !Number.isFinite(value)) {
     return '';
@@ -405,6 +351,26 @@ function handleMessage(event: MessageEvent) {
   if (event.data?.command === 'state') {
     state.value = event.data.payload as WebviewState;
   }
+}
+
+function onMarketplaceItemClick(item: any) { // using any for convenience as item type is known in context
+    const skill = item as MarketplaceSkill;
+    openUrl(getSkillUrl(skill));
+}
+
+function onInstalledItemClick(item: any) {
+    const skill = item as InstalledSkill;
+    openSkill(skill.path);
+}
+
+// Mapper for SkillList to render installed items correctly
+function installedItemMapper(item: MarketplaceSkill | InstalledSkill) {
+  const skill = item as InstalledSkill;
+  return {
+    title: skill.name,
+    subtitle: buildInstalledSubtitle(skill),
+    meta: formatDate(skill.updatedAt)
+  };
 }
 
 watch(activeTab, (value) => {
