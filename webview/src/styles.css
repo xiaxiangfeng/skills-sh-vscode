@@ -168,6 +168,20 @@ button.secondary:hover {
   font-size: 12px;
 }
 
+.update-banner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 8px 10px;
+  margin: 8px 8px 0 8px;
+  border: 1px solid var(--vscode-panel-border);
+  border-radius: 6px;
+  background: var(--vscode-editorWidget-background, var(--vscode-sideBar-background));
+  font-size: 11px;
+  color: var(--vscode-foreground);
+}
+
 .list-header {
   display: flex;
   align-items: center;

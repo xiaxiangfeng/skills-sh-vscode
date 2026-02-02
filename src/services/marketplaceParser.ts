@@ -63,6 +63,16 @@ export class MarketplaceParser {
       const installs = this.formatInstalls(
         item.installs || item.installCount || item.installs_count || item.count || item.downloads
       );
+      const updatedAt = this.parseUpdatedAt(
+        item.updatedAt ||
+          item.updated_at ||
+          item.lastUpdated ||
+          item.last_updated ||
+          item.pushed_at ||
+          item.updated ||
+          item.timestamp ||
+          item.ts
+      );
 
       const url = item.url || `https://skills.sh/${repo}/${name}`;
       const key = `${repo}/${name}`;
@@ -76,7 +86,8 @@ export class MarketplaceParser {
         name: String(name),
         repo: String(repo),
         installs,
-        url: String(url)
+        url: String(url),
+        updatedAt
       });
     }
 
@@ -212,5 +223,24 @@ export class MarketplaceParser {
     }
 
     return 'N/A';
+  }
+
+  private parseUpdatedAt(value: unknown): number | undefined {
+    if (typeof value === 'number' && Number.isFinite(value)) {
+      return value < 1e12 ? value * 1000 : value;
+    }
+
+    if (typeof value === 'string' && value.trim().length > 0) {
+      const parsed = Date.parse(value);
+      if (!Number.isNaN(parsed)) {
+        return parsed;
+      }
+      const numeric = Number(value);
+      if (Number.isFinite(numeric)) {
+        return numeric < 1e12 ? numeric * 1000 : numeric;
+      }
+    }
+
+    return undefined;
   }
 }

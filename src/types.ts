@@ -18,6 +18,8 @@ export interface Skill {
   agent: AgentType;
   agentLabel?: string;
   updatedAt?: number;
+  source?: string;
+  sourceUrl?: string;
 }
 
 export interface MarketplaceSkill {
@@ -25,6 +27,7 @@ export interface MarketplaceSkill {
   repo: string;
   installs: string;
   url: string;
+  updatedAt?: number;
 }
 
 export interface MarketplaceCategoryState {
@@ -46,4 +49,5 @@ export interface WebviewState {
   installed: Skill[];
   marketplace: Record<MarketplaceCategory, MarketplaceCategoryState>;
   search: SearchState;
+  updates: Record<string, MarketplaceSkill>;
 }

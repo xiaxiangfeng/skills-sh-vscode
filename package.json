@@ -2,7 +2,7 @@
   "name": "skills-sh-vscode",
   "displayName": "skills.sh - Skills Browser",
   "description": "Browse, install, and manage skills.sh skills directly in VS Code",
-  "version": "0.1.2",
+  "version": "0.1.3",
   "publisher": "xiaxiangfeng",
   "author": "xiaxiangfeng",
   "license": "MIT",
@@ -123,6 +123,47 @@
           "type": "number",
           "default": 5,
           "description": "Cache duration for marketplace lists in minutes."
+        },
+        "skillsSh.updates.autoCheck": {
+          "type": "boolean",
+          "default": true,
+          "description": "Automatically check for skill updates when the view opens."
+        },
+        "skillsSh.updates.cacheMinutes": {
+          "type": "number",
+          "default": 10,
+          "description": "Cache duration for update checks in minutes."
+        },
+        "skillsSh.updates.command": {
+          "type": "string",
+          "default": "npx",
+          "description": "Command used to run the skills CLI for update checks."
+        },
+        "skillsSh.updates.checkArgs": {
+          "type": "array",
+          "default": [
+            "skills",
+            "check"
+          ],
+          "description": "Arguments passed to the update check command."
+        },
+        "skillsSh.updates.updateArgs": {
+          "type": "array",
+          "default": [
+            "skills",
+            "update"
+          ],
+          "description": "Arguments passed to the update command."
+        },
+        "skillsSh.updates.cwd": {
+          "type": "string",
+          "default": "home",
+          "enum": [
+            "workspace",
+            "home",
+            "extension"
+          ],
+          "description": "Working directory for the update check command."
         },
         "skillsSh.webview.devServerUrl": {
           "type": "string",

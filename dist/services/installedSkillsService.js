@@ -37,6 +37,7 @@ exports.scanInstalledSkills = scanInstalledSkills;
 const vscode = __importStar(require("vscode"));
 const path = __importStar(require("path"));
 const os = __importStar(require("os"));
+const fs = __importStar(require("fs"));
 const yaml_1 = require("yaml");
 function parseFrontmatter(content) {
     const match = content.match(/^---\s*\n([\s\S]*?)\n---/);
@@ -50,7 +51,30 @@ function parseFrontmatter(content) {
         return {};
     }
 }
-async function readSkillFile(skillMdPath, fallbackName, level, agent, agentLabel) {
+async function readSkillLockMap() {
+    const map = new Map();
+    const lockPath = path.join(os.homedir(), '.agents', '.skill-lock.json');
+    try {
+        const content = await fs.promises.readFile(lockPath, 'utf8');
+        const parsed = JSON.parse(content);
+        const skills = parsed?.skills && typeof parsed.skills === 'object' ? parsed.skills : {};
+        for (const [name, entry] of Object.entries(skills)) {
+            if (!name)
+                continue;
+            const source = entry?.source;
+            const sourceUrl = entry?.sourceUrl;
+            map.set(name.toLowerCase(), {
+                source: typeof source === 'string' ? source : undefined,
+                sourceUrl: typeof sourceUrl === 'string' ? sourceUrl : undefined
+            });
+        }
+    }
+    catch {
+        return map;
+    }
+    return map;
+}
+async function readSkillFile(skillMdPath, fallbackName, level, agent, agentLabel, lockMap) {
     const fileUri = vscode.Uri.file(skillMdPath);
     let updatedAt;
     try {
@@ -63,14 +87,18 @@ async function readSkillFile(skillMdPath, fallbackName, level, agent, agentLabel
     try {
         const content = Buffer.from(await vscode.workspace.fs.readFile(fileUri)).toString('utf-8');
         const frontmatter = parseFrontmatter(content);
+        const name = frontmatter.name || fallbackName;
+        const lockEntry = lockMap.get(name.toLowerCase());
         return {
-            name: frontmatter.name || fallbackName,
+            name,
             description: frontmatter.description || '',
             path: skillMdPath,
             level,
             agent,
             agentLabel,
-            updatedAt
+            updatedAt,
+            source: lockEntry?.source,
+            sourceUrl: lockEntry?.sourceUrl
         };
     }
     catch {
@@ -81,11 +109,13 @@ async function readSkillFile(skillMdPath, fallbackName, level, agent, agentLabel
             level,
             agent,
             agentLabel,
-            updatedAt
+            updatedAt,
+            source: lockMap.get(fallbackName.toLowerCase())?.source,
+            sourceUrl: lockMap.get(fallbackName.toLowerCase())?.sourceUrl
         };
     }
 }
-async function scanDirectory(dirPath, level, agent, agentLabel) {
+async function scanDirectory(dirPath, level, agent, agentLabel, lockMap) {
     const skills = [];
     const dirUri = vscode.Uri.file(dirPath);
     try {
@@ -122,7 +152,7 @@ async function scanDirectory(dirPath, level, agent, agentLabel) {
                 continue;
             }
             const skillMdPath = path.join(dirPath, name, skillFile);
-            skills.push(await readSkillFile(skillMdPath, name, level, agent, agentLabel));
+            skills.push(await readSkillFile(skillMdPath, name, level, agent, agentLabel, lockMap));
             continue;
         }
         if ((type & vscode.FileType.File) === 0) {
@@ -134,7 +164,7 @@ async function scanDirectory(dirPath, level, agent, agentLabel) {
         }
         const skillMdPath = path.join(dirPath, name);
         const fallbackName = path.basename(name, path.extname(name));
-        skills.push(await readSkillFile(skillMdPath, fallbackName, level, agent, agentLabel));
+        skills.push(await readSkillFile(skillMdPath, fallbackName, level, agent, agentLabel, lockMap));
     }
     return skills;
 }
@@ -160,6 +190,7 @@ async function scanInstalledSkills(agents) {
     if (!agents || agents.length === 0) {
         return allSkills;
     }
+    const lockMap = await readSkillLockMap();
     const workspaceRoots = (vscode.workspace.workspaceFolders || []).map((folder) => folder.uri.fsPath);
     for (const agent of agents) {
         const agentName = agent.name;
@@ -168,12 +199,12 @@ async function scanInstalledSkills(agents) {
             const dirPath = resolveProjectSkillsDir(agent, root);
             if (!dirPath)
                 continue;
-            const skills = await scanDirectory(dirPath, 'project', agentName, agentLabel);
+            const skills = await scanDirectory(dirPath, 'project', agentName, agentLabel, lockMap);
             allSkills.push(...skills);
         }
         const userDir = resolveUserSkillsDir(agent);
         if (userDir) {
-            const skills = await scanDirectory(userDir, 'user', agentName, agentLabel);
+            const skills = await scanDirectory(userDir, 'user', agentName, agentLabel, lockMap);
             allSkills.push(...skills);
         }
     }

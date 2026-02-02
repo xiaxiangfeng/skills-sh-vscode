@@ -1,12 +1,18 @@
 ﻿import * as vscode from 'vscode';
 import * as path from 'path';
 import * as os from 'os';
+import * as fs from 'fs';
 import { parse as parseYaml } from 'yaml';
 import { AgentDefinition, Skill, SkillLevel } from '../types';
 
 interface SkillFrontmatter {
   name?: string;
   description?: string;
+}
+
+interface SkillLockEntry {
+  source?: string;
+  sourceUrl?: string;
 }
 
 function parseFrontmatter(content: string): SkillFrontmatter {
@@ -22,12 +28,38 @@ function parseFrontmatter(content: string): SkillFrontmatter {
   }
 }
 
+async function readSkillLockMap(): Promise<Map<string, SkillLockEntry>> {
+  const map = new Map<string, SkillLockEntry>();
+  const lockPath = path.join(os.homedir(), '.agents', '.skill-lock.json');
+
+  try {
+    const content = await fs.promises.readFile(lockPath, 'utf8');
+    const parsed = JSON.parse(content);
+    const skills = parsed?.skills && typeof parsed.skills === 'object' ? parsed.skills : {};
+
+    for (const [name, entry] of Object.entries(skills)) {
+      if (!name) continue;
+      const source = (entry as any)?.source;
+      const sourceUrl = (entry as any)?.sourceUrl;
+      map.set(name.toLowerCase(), {
+        source: typeof source === 'string' ? source : undefined,
+        sourceUrl: typeof sourceUrl === 'string' ? sourceUrl : undefined
+      });
+    }
+  } catch {
+    return map;
+  }
+
+  return map;
+}
+
 async function readSkillFile(
   skillMdPath: string,
   fallbackName: string,
   level: SkillLevel,
   agent: string,
-  agentLabel?: string
+  agentLabel: string | undefined,
+  lockMap: Map<string, SkillLockEntry>
 ): Promise<Skill> {
   const fileUri = vscode.Uri.file(skillMdPath);
   let updatedAt: number | undefined;
@@ -42,15 +74,19 @@ async function readSkillFile(
   try {
     const content = Buffer.from(await vscode.workspace.fs.readFile(fileUri)).toString('utf-8');
     const frontmatter = parseFrontmatter(content);
+    const name = frontmatter.name || fallbackName;
+    const lockEntry = lockMap.get(name.toLowerCase());
 
     return {
-      name: frontmatter.name || fallbackName,
+      name,
       description: frontmatter.description || '',
       path: skillMdPath,
       level,
       agent,
       agentLabel,
-      updatedAt
+      updatedAt,
+      source: lockEntry?.source,
+      sourceUrl: lockEntry?.sourceUrl
     };
   } catch {
     return {
@@ -60,7 +96,9 @@ async function readSkillFile(
       level,
       agent,
       agentLabel,
-      updatedAt
+      updatedAt,
+      source: lockMap.get(fallbackName.toLowerCase())?.source,
+      sourceUrl: lockMap.get(fallbackName.toLowerCase())?.sourceUrl
     };
   }
 }
@@ -69,7 +107,8 @@ async function scanDirectory(
   dirPath: string,
   level: SkillLevel,
   agent: string,
-  agentLabel?: string
+  agentLabel: string | undefined,
+  lockMap: Map<string, SkillLockEntry>
 ): Promise<Skill[]> {
   const skills: Skill[] = [];
   const dirUri = vscode.Uri.file(dirPath);
@@ -110,7 +149,7 @@ async function scanDirectory(
       }
 
       const skillMdPath = path.join(dirPath, name, skillFile);
-      skills.push(await readSkillFile(skillMdPath, name, level, agent, agentLabel));
+      skills.push(await readSkillFile(skillMdPath, name, level, agent, agentLabel, lockMap));
       continue;
     }
 
@@ -125,7 +164,7 @@ async function scanDirectory(
 
     const skillMdPath = path.join(dirPath, name);
     const fallbackName = path.basename(name, path.extname(name));
-    skills.push(await readSkillFile(skillMdPath, fallbackName, level, agent, agentLabel));
+    skills.push(await readSkillFile(skillMdPath, fallbackName, level, agent, agentLabel, lockMap));
   }
 
   return skills;
@@ -155,6 +194,7 @@ export async function scanInstalledSkills(agents: AgentDefinition[]): Promise<Sk
     return allSkills;
   }
 
+  const lockMap = await readSkillLockMap();
   const workspaceRoots = (vscode.workspace.workspaceFolders || []).map((folder) => folder.uri.fsPath);
 
   for (const agent of agents) {
@@ -164,13 +204,13 @@ export async function scanInstalledSkills(agents: AgentDefinition[]): Promise<Sk
     for (const root of workspaceRoots) {
       const dirPath = resolveProjectSkillsDir(agent, root);
       if (!dirPath) continue;
-      const skills = await scanDirectory(dirPath, 'project', agentName, agentLabel);
+      const skills = await scanDirectory(dirPath, 'project', agentName, agentLabel, lockMap);
       allSkills.push(...skills);
     }
 
     const userDir = resolveUserSkillsDir(agent);
     if (userDir) {
-      const skills = await scanDirectory(userDir, 'user', agentName, agentLabel);
+      const skills = await scanDirectory(userDir, 'user', agentName, agentLabel, lockMap);
       allSkills.push(...skills);
     }
   }

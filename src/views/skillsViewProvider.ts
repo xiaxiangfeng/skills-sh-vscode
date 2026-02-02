@@ -1,6 +1,8 @@
 import * as vscode from 'vscode';
 import * as fs from 'fs';
 import * as path from 'path';
+import * as os from 'os';
+import { spawn } from 'child_process';
 import { SkillInstaller } from '../services/skillInstaller';
 import { scanInstalledSkills } from '../services/installedSkillsService';
 import { SkillsShClient } from '../services/skillsShClient';
@@ -9,6 +11,7 @@ import {
   AgentDefinition,
   MarketplaceCategory,
   MarketplaceCategoryState,
+  MarketplaceSkill,
   SearchState,
   Skill,
   WebviewState
@@ -20,8 +23,14 @@ interface MarketplaceCacheData {
   timestamp: number;
 }
 
+interface UpdatesCacheData {
+  data: Record<string, MarketplaceSkill>;
+  timestamp: number;
+}
+
 const CACHE_KEY_INSTALLED = 'skillsSh.installed';
 const CACHE_KEY_MARKETPLACE_PREFIX = 'skillsSh.marketplace.';
+const CACHE_KEY_UPDATES = 'skillsSh.updates';
 
 export class SkillsViewProvider implements vscode.WebviewViewProvider {
   public static readonly viewType = 'skillsShView';
@@ -29,6 +38,7 @@ export class SkillsViewProvider implements vscode.WebviewViewProvider {
   private view?: vscode.WebviewView;
   private readonly client = new SkillsShClient();
   private readonly installer: SkillInstaller;
+  private readonly output: vscode.OutputChannel;
 
   private installedSkills: Skill[] = [];
   private agentDefinitions: AgentDefinition[] = [];
@@ -37,6 +47,9 @@ export class SkillsViewProvider implements vscode.WebviewViewProvider {
     trending: { skills: [], totalCount: undefined, isLoading: false, error: null },
     hot: { skills: [], totalCount: undefined, isLoading: false, error: null }
   };
+  private updates: Record<string, MarketplaceSkill> = {};
+  private lastUpdateCount = 0;
+  private isUpdateCheckRunning = false;
   private searchState: SearchState = {
     query: '',
     results: [],
@@ -51,6 +64,7 @@ export class SkillsViewProvider implements vscode.WebviewViewProvider {
     private readonly context: vscode.ExtensionContext
   ) {
     this.installer = new SkillInstaller(context);
+    this.output = vscode.window.createOutputChannel('skills.sh');
   }
 
   async resolveWebviewView(
@@ -71,12 +85,18 @@ export class SkillsViewProvider implements vscode.WebviewViewProvider {
     this.loadFromCache();
     this.updateWebview();
 
-    this.refreshInstalledSkills().then(() => this.updateWebview());
+    this.refreshInstalledSkills().then(async () => {
+      await this.refreshUpdateHints(true);
+      this.updateWebview();
+    });
     this.fetchMarketplaceCategories();
 
     webviewView.onDidChangeVisibility(() => {
       if (!webviewView.visible) return;
-      this.refreshInstalledSkills().then(() => this.updateWebview());
+      this.refreshInstalledSkills().then(async () => {
+        await this.refreshUpdateHints(true);
+        this.updateWebview();
+      });
     });
 
     webviewView.webview.onDidReceiveMessage(async (message) => {
@@ -106,6 +126,9 @@ export class SkillsViewProvider implements vscode.WebviewViewProvider {
             vscode.env.openExternal(vscode.Uri.parse(message.url));
           }
           break;
+        case 'updateAll':
+          await this.handleUpdateAll();
+          break;
         default:
           break;
       }
@@ -115,6 +138,7 @@ export class SkillsViewProvider implements vscode.WebviewViewProvider {
   async refresh(force = false) {
     await this.refreshAgentDefinitions();
     await this.refreshInstalledSkills();
+    await this.refreshUpdateHints(force);
     await this.fetchMarketplaceCategories(force);
     if (this.searchState.query) {
       await this.searchMarketplace(this.searchState.query, true);
@@ -148,6 +172,12 @@ export class SkillsViewProvider implements vscode.WebviewViewProvider {
         };
       }
     }
+
+    const cachedUpdates = this.context.globalState.get<UpdatesCacheData>(CACHE_KEY_UPDATES);
+    if (cachedUpdates?.data) {
+      this.updates = cachedUpdates.data;
+      this.lastUpdateCount = Object.keys(this.updates).length;
+    }
   }
 
   private getCacheTtlMs() {
@@ -157,12 +187,96 @@ export class SkillsViewProvider implements vscode.WebviewViewProvider {
     return Math.max(minutes, 1) * 60 * 1000;
   }
 
+  private getUpdateCacheTtlMs() {
+    const minutes = vscode.workspace
+      .getConfiguration('skillsSh')
+      .get<number>('updates.cacheMinutes', 10);
+    return Math.max(minutes, 1) * 60 * 1000;
+  }
+
+  private isUpdateAutoCheckEnabled() {
+    return vscode.workspace
+      .getConfiguration('skillsSh')
+      .get<boolean>('updates.autoCheck', true);
+  }
+
+  private getUpdateCommand() {
+    return vscode.workspace
+      .getConfiguration('skillsSh')
+      .get<string>('updates.command', 'npx');
+  }
+
+  private getUpdateCheckArgs() {
+    return vscode.workspace
+      .getConfiguration('skillsSh')
+      .get<string[]>('updates.checkArgs', ['skills', 'check']);
+  }
+
+  private getUpdateAllArgs() {
+    return vscode.workspace
+      .getConfiguration('skillsSh')
+      .get<string[]>('updates.updateArgs', ['skills', 'update']);
+  }
+
+  private resolveUpdateCwd(): string {
+    const mode = vscode.workspace
+      .getConfiguration('skillsSh')
+      .get<string>('updates.cwd', 'home');
+    const workspaceRoot = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+
+    if (mode === 'workspace' && workspaceRoot) {
+      return workspaceRoot;
+    }
+    if (mode === 'extension') {
+      return this.context.extensionPath;
+    }
+    return os.homedir() || workspaceRoot || this.context.extensionPath;
+  }
+
   private async refreshInstalledSkills() {
     this.installedSkills = await scanInstalledSkills(this.agentDefinitions);
     this.context.globalState.update(CACHE_KEY_INSTALLED, {
       data: this.installedSkills,
       timestamp: Date.now()
     });
+  }
+
+  private async refreshUpdateHints(force = false) {
+    if (!this.isUpdateAutoCheckEnabled()) {
+      this.updates = {};
+      return;
+    }
+
+    if (!force) {
+      const cached = this.context.globalState.get<UpdatesCacheData>(CACHE_KEY_UPDATES);
+      const ttl = this.getUpdateCacheTtlMs();
+      const isCacheValid = cached && Date.now() - cached.timestamp < ttl;
+      if (isCacheValid && cached.data) {
+        this.updates = cached.data;
+        return;
+      }
+    }
+
+    if (this.isUpdateCheckRunning) {
+      return;
+    }
+
+    this.isUpdateCheckRunning = true;
+    try {
+      const updates = await this.runCliCheckUpdates();
+      if (!updates) {
+        return;
+      }
+
+      this.updates = updates;
+      this.context.globalState.update(CACHE_KEY_UPDATES, {
+        data: updates,
+        timestamp: Date.now()
+      } as UpdatesCacheData);
+      this.maybeNotifyUpdates(updates);
+    } finally {
+      this.isUpdateCheckRunning = false;
+    }
   }
 
   private async refreshAgentDefinitions() {
@@ -283,6 +397,7 @@ export class SkillsViewProvider implements vscode.WebviewViewProvider {
     const didInstall = await this.installer.installSkill({ repo, skill });
     if (didInstall) {
       await this.refreshInstalledSkills();
+      await this.refreshUpdateHints(true);
       this.updateWebview();
     }
   }
@@ -348,6 +463,7 @@ export class SkillsViewProvider implements vscode.WebviewViewProvider {
       }
 
       await this.refreshInstalledSkills();
+      await this.refreshUpdateHints(true);
       this.updateWebview();
       vscode.window.showInformationMessage(`Skill "${name}" deleted.`);
     } catch (error) {
@@ -375,6 +491,191 @@ export class SkillsViewProvider implements vscode.WebviewViewProvider {
     return { targetPath, resolvedTarget };
   }
 
+  private async handleUpdateAll() {
+    const didUpdate = await this.runCliUpdateAll();
+    if (didUpdate) {
+      await this.refreshInstalledSkills();
+      await this.refreshUpdateHints(true);
+      this.updateWebview();
+    }
+  }
+
+  private async runCliUpdateAll(): Promise<boolean> {
+    const command = this.getUpdateCommand();
+    const args = this.getUpdateAllArgs();
+    const cwd = this.resolveUpdateCwd();
+
+    this.output.appendLine(`[update] ${command} ${args.join(' ')}`);
+
+    return vscode.window.withProgress(
+      {
+        location: vscode.ProgressLocation.Notification,
+        title: 'Updating skills...',
+        cancellable: false
+      },
+      async () => {
+        const result = await this.spawnProcess(command, args, cwd);
+        if (result.code === 0) {
+          vscode.window.showInformationMessage('Skills updated successfully.', 'Show Output').then((action) => {
+            if (action) this.output.show(true);
+          });
+          return true;
+        }
+
+        const message = result.error || result.stderr || 'Update failed.';
+        vscode.window.showErrorMessage(message, 'Show Output').then((action) => {
+          if (action) this.output.show(true);
+        });
+        return false;
+      }
+    );
+  }
+
+  private async runCliCheckUpdates(): Promise<Record<string, MarketplaceSkill> | undefined> {
+    const command = this.getUpdateCommand();
+    const args = this.getUpdateCheckArgs();
+    const cwd = this.resolveUpdateCwd();
+
+    this.output.appendLine(`[check] ${command} ${args.join(' ')}`);
+
+    const result = await this.spawnProcess(command, args, cwd);
+    if (result.code !== 0) {
+      const message = result.error || result.stderr || 'Update check failed.';
+      this.output.appendLine(`[check] ${message}`);
+      return undefined;
+    }
+
+    return this.parseCliUpdatesOutput(result.stdout + '\n' + result.stderr);
+  }
+
+  private parseCliUpdatesOutput(output: string): Record<string, MarketplaceSkill> {
+    const updates: Record<string, MarketplaceSkill> = {};
+    const sanitized = this.stripAnsi(output);
+    const lines = sanitized.split(/\r?\n/);
+    let inUpdates = false;
+    let pendingName: string | undefined;
+
+    for (const line of lines) {
+      const trimmed = line.trim();
+      if (!trimmed) continue;
+
+      if (/update\(s\)\s+available/i.test(trimmed)) {
+        inUpdates = true;
+        continue;
+      }
+
+      if (!inUpdates) continue;
+
+      if (/^Run\s+npx\s+skills\s+update/i.test(trimmed)) {
+        inUpdates = false;
+        continue;
+      }
+
+      const sourceMatch = trimmed.match(/^source:\s*(.+)$/i);
+      if (sourceMatch && pendingName) {
+        const source = sourceMatch[1].trim();
+        updates[pendingName] = this.buildUpdateEntry(pendingName, source);
+        pendingName = undefined;
+        continue;
+      }
+
+      const name = this.extractUpdateName(trimmed);
+      if (name) {
+        if (pendingName && !updates[pendingName]) {
+          updates[pendingName] = this.buildUpdateEntry(pendingName);
+        }
+        pendingName = name;
+      }
+    }
+
+    if (pendingName && !updates[pendingName]) {
+      updates[pendingName] = this.buildUpdateEntry(pendingName);
+    }
+
+    return updates;
+  }
+
+  private stripAnsi(value: string): string {
+    return value.replace(/\u001b\[[0-9;]*m/g, '');
+  }
+
+  private extractUpdateName(value: string): string | undefined {
+    const cleaned = value.replace(/^[^A-Za-z0-9]+/, '').trim();
+    const match = cleaned.match(/^([A-Za-z0-9_.-]+)$/);
+    return match?.[1];
+  }
+
+  private buildUpdateEntry(name: string, source?: string): MarketplaceSkill {
+    let repo = source || '';
+    if (repo.startsWith('https://')) {
+      repo = repo.replace(/^https:\/\/(github\.com|gitlab\.com)\//, '');
+    }
+
+    const url = source?.startsWith('http') ? source : `https://skills.sh/${repo || name}/${name}`;
+    return {
+      name,
+      repo: repo || name,
+      installs: 'N/A',
+      url,
+      updatedAt: Date.now()
+    };
+  }
+
+  private async spawnProcess(
+    command: string,
+    args: string[],
+    cwd: string
+  ): Promise<{ code: number; stdout: string; stderr: string; error?: string }> {
+    return new Promise((resolve) => {
+      const child = spawn(command, args, { cwd, shell: true, env: { ...process.env } });
+      let stdout = '';
+      let stderr = '';
+
+      child.stdout?.on('data', (data) => {
+        const text = data.toString();
+        stdout += text;
+        this.output.append(text);
+      });
+
+      child.stderr?.on('data', (data) => {
+        const text = data.toString();
+        stderr += text;
+        this.output.append(text);
+      });
+
+      child.on('error', (error) => {
+        resolve({ code: -1, stdout, stderr, error: error.message });
+      });
+
+      child.on('close', (code) => {
+        resolve({ code: code ?? 0, stdout, stderr });
+      });
+    });
+  }
+
+  private maybeNotifyUpdates(updates: Record<string, MarketplaceSkill>) {
+    const count = Object.keys(updates).length;
+    if (count === 0) {
+      this.lastUpdateCount = 0;
+      return;
+    }
+
+    if (count === this.lastUpdateCount) {
+      return;
+    }
+
+    this.lastUpdateCount = count;
+    vscode.window
+      .showInformationMessage(`${count} skill update(s) available.`, 'Update all', 'Show Output')
+      .then((action) => {
+        if (action === 'Update all') {
+          this.handleUpdateAll();
+        } else if (action === 'Show Output') {
+          this.output.show(true);
+        }
+      });
+  }
+
   private updateWebview() {
     if (!this.view) return;
     if (!this.hasInitializedWebview) {
@@ -393,7 +694,8 @@ export class SkillsViewProvider implements vscode.WebviewViewProvider {
       agents: this.agentDefinitions,
       installed: this.installedSkills,
       marketplace: this.marketplace,
-      search: this.searchState
+      search: this.searchState,
+      updates: this.updates
     };
   }
 

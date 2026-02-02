@@ -40,10 +40,10 @@
         <template #actions="{ item }">
           <button
             class="install-btn"
-            :class="isInstalled(item.name) ? 'secondary' : 'primary'"
+            :class="getMarketplaceButtonClass(item)"
             @click.stop="installSkill(item.repo, item.name)"
           >
-            {{ isInstalled(item.name) ? 'Reinstall' : 'Install' }}
+            {{ getMarketplaceButtonLabel(item) }}
           </button>
         </template>
       </SkillList>
@@ -57,6 +57,10 @@
           <option value="type">Type</option>
           <option value="time">Time</option>
         </select>
+      </div>
+      <div v-if="updatesCount" class="update-banner">
+        <span>{{ updatesCount }} update(s) available</span>
+        <button class="primary install-btn" @click.stop="updateAll">Update all</button>
       </div>
 
       <div id="installed-list">
@@ -72,9 +76,9 @@
         >
           <template #actions="{ item }">
             <button
-              v-if="getMarketplaceMatch(item.name)"
+              v-if="getReinstallPayload(item)"
               class="secondary install-btn"
-              @click.stop="installSkill(getMarketplaceMatch(item.name)?.repo || '', item.name)"
+              @click.stop="reinstallSkill(item)"
             >
               Reinstall
             </button>
@@ -143,6 +147,10 @@ const tabs = computed(() => {
 });
 
 const installedNames = computed(() => new Set(state.value.installed.map((skill) => skill.name)));
+const updateAvailableNames = computed(() => new Set(Object.keys(state.value.updates || {})));
+const updatesCount = computed(() => updateAvailableNames.value.size);
+
+const updatesIndex = computed(() => new Map<string, MarketplaceSkill>(Object.entries(state.value.updates || {})));
 
 const marketplaceIndex = computed(() => {
   const index = new Map<string, MarketplaceSkill>();
@@ -294,6 +302,58 @@ function getMarketplaceMatch(name: string) {
   return marketplaceIndex.value.get(name);
 }
 
+function getReinstallPayload(skill: InstalledSkill): { repo: string; skill?: string } | undefined {
+  const market = getMarketplaceMatch(skill.name);
+  if (market?.repo) {
+    return { repo: market.repo, skill: skill.name };
+  }
+
+  const source = skill.sourceUrl || skill.source;
+  if (!source) return undefined;
+
+  if (isDirectSkillUrl(source)) {
+    return { repo: source };
+  }
+
+  return { repo: source, skill: skill.name };
+}
+
+function isDirectSkillUrl(value: string): boolean {
+  if (!value.startsWith('http://') && !value.startsWith('https://')) return false;
+  return value.toLowerCase().endsWith('/skill.md');
+}
+
+function reinstallSkill(skill: InstalledSkill) {
+  const payload = getReinstallPayload(skill);
+  if (!payload) return;
+  installSkill(payload.repo, payload.skill);
+}
+
+function isUpdateAvailable(skill: InstalledSkill): boolean {
+  if (updatesIndex.value.has(skill.name)) {
+    return true;
+  }
+  const market = getMarketplaceMatch(skill.name);
+  if (!market?.updatedAt || !skill.updatedAt) {
+    return false;
+  }
+  return market.updatedAt > skill.updatedAt;
+}
+
+function getMarketplaceButtonLabel(skill: MarketplaceSkill): string {
+  if (!isInstalled(skill.name)) {
+    return 'Install';
+  }
+  return 'Reinstall';
+}
+
+function getMarketplaceButtonClass(skill: MarketplaceSkill): string {
+  if (!isInstalled(skill.name)) {
+    return 'primary';
+  }
+  return 'secondary';
+}
+
 function formatDate(value?: number) {
   if (!value) return '';
   return new Date(value).toLocaleDateString();
@@ -339,6 +399,10 @@ function deleteSkill(skill: InstalledSkill) {
   vscode.postMessage({ command: 'deleteSkill', path: skill.path, name: skill.name });
 }
 
+function updateAll() {
+  vscode.postMessage({ command: 'updateAll' });
+}
+
 function handleRetry(type: 'search' | 'marketplace') {
   if (type === 'search') {
     vscode.postMessage({ command: 'search', query: searchQuery.value });
@@ -366,10 +430,14 @@ function onInstalledItemClick(item: any) {
 // Mapper for SkillList to render installed items correctly
 function installedItemMapper(item: MarketplaceSkill | InstalledSkill) {
   const skill = item as InstalledSkill;
+  const metaParts = [formatDate(skill.updatedAt)];
+  if (isUpdateAvailable(skill)) {
+    metaParts.push('Update available');
+  }
   return {
     title: skill.name,
     subtitle: buildInstalledSubtitle(skill),
-    meta: formatDate(skill.updatedAt)
+    meta: metaParts.filter(Boolean).join(' · ')
   };
 }
 

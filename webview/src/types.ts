@@ -16,6 +16,7 @@ export interface MarketplaceSkill {
   repo: string;
   installs: string;
   url: string;
+  updatedAt?: number;
 }
 
 export interface InstalledSkill {
@@ -26,6 +27,8 @@ export interface InstalledSkill {
   agent: AgentType;
   agentLabel?: string;
   updatedAt?: number;
+  source?: string;
+  sourceUrl?: string;
 }
 
 export interface MarketplaceCategoryState {
@@ -47,6 +50,7 @@ export interface WebviewState {
   installed: InstalledSkill[];
   marketplace: Record<MarketplaceCategory, MarketplaceCategoryState>;
   search: SearchState;
+  updates: Record<string, MarketplaceSkill>;
 }
 
 export function createEmptyState(): WebviewState {
@@ -58,6 +62,7 @@ export function createEmptyState(): WebviewState {
       trending: { skills: [], totalCount: undefined, isLoading: false, error: null },
       hot: { skills: [], totalCount: undefined, isLoading: false, error: null }
     },
-    search: { query: '', results: [], isLoading: false, error: null }
+    search: { query: '', results: [], isLoading: false, error: null },
+    updates: {}
   };
 }
