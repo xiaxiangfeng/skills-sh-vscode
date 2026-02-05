@@ -2,7 +2,7 @@
   "name": "skills-sh-vscode",
   "displayName": "skills.sh - Skills Browser",
   "description": "Browse, install, and manage skills.sh skills directly in VS Code",
-  "version": "0.1.4",
+  "version": "0.1.5",
   "publisher": "xiaxiangfeng",
   "author": "xiaxiangfeng",
   "license": "MIT",
@@ -184,7 +184,10 @@
     "package": "npm run vscode:prepublish && npx @vscode/vsce package",
     "package:pnpm": "pnpm install --node-linker=hoisted && npm run package",
     "publish:vsce": "npm run vscode:prepublish && npx @vscode/vsce publish",
-    "publish:ovsx": "npm run vscode:prepublish && node scripts/publish-ovsx.js"
+    "publish:ovsx": "npm run vscode:prepublish && node scripts/publish-ovsx.js",
+    "tag": "git tag v$npm_package_version",
+    "tag:push": "git push origin v$npm_package_version",
+    "release:tag": "git tag v$npm_package_version && git push origin v$npm_package_version"
   },
   "devDependencies": {
     "@types/node": "^20.10.0",
