@@ -1,7 +1,7 @@
 <template>
   <div class="app">
     <div class="app-header">
-      <SearchBar v-model="searchQuery" />
+      <SearchBar v-model="searchInput" @submit="submitSearch" />
       <div class="tabs">
         <button
           v-for="tab in tabs"
@@ -108,6 +108,7 @@ import {
 const persisted = vscode.getState() || {};
 
 const activeTab = ref<ActiveTab>((persisted.activeTab as ActiveTab) || 'all');
+const searchInput = ref<string>((persisted.searchInput as string) || (persisted.searchQuery as string) || '');
 const searchQuery = ref<string>((persisted.searchQuery as string) || '');
 const installedSort = ref<'type' | 'time'>((persisted.installedSort as 'type' | 'time') || 'type');
 
@@ -119,7 +120,6 @@ if (!['type', 'time'].includes(installedSort.value)) {
 }
 
 const state = ref<WebviewState>(createEmptyState());
-let searchTimer: number | undefined;
 
 const agentDefinitions = computed<AgentDefinition[]>(() => state.value.agents || []);
 const agentLabelMap = computed(() => {
@@ -282,6 +282,7 @@ const marketplaceView = computed<MarketplaceView>(() => {
 function persistState() {
   vscode.setState({
     activeTab: activeTab.value,
+    searchInput: searchInput.value,
     searchQuery: searchQuery.value,
     installedSort: installedSort.value
   });
@@ -437,8 +438,14 @@ function installedItemMapper(item: MarketplaceSkill | InstalledSkill) {
   return {
     title: skill.name,
     subtitle: buildInstalledSubtitle(skill),
-    meta: metaParts.filter(Boolean).join(' · ')
+    meta: metaParts.filter(Boolean).join(' - ')
   };
+}
+
+function submitSearch() {
+  const trimmed = searchInput.value.trim();
+  searchQuery.value = trimmed;
+  vscode.postMessage({ command: 'search', query: trimmed });
 }
 
 watch(activeTab, (value) => {
@@ -452,22 +459,16 @@ watch(installedSort, () => {
   persistState();
 });
 
-watch(searchQuery, (value) => {
+watch(searchQuery, () => {
   persistState();
+});
 
-  if (searchTimer) {
-    window.clearTimeout(searchTimer);
-  }
-
-  const trimmed = value.trim();
-  if (!trimmed) {
+watch(searchInput, (value) => {
+  persistState();
+  if (!value.trim() && searchQuery.value) {
+    searchQuery.value = '';
     vscode.postMessage({ command: 'search', query: '' });
-    return;
   }
-
-  searchTimer = window.setTimeout(() => {
-    vscode.postMessage({ command: 'search', query: trimmed });
-  }, 250);
 });
 
 onMounted(() => {
@@ -477,6 +478,9 @@ onMounted(() => {
   }
   if (searchQuery.value.trim()) {
     vscode.postMessage({ command: 'search', query: searchQuery.value.trim() });
+  } else if (searchInput.value.trim()) {
+    searchQuery.value = searchInput.value.trim();
+    vscode.postMessage({ command: 'search', query: searchQuery.value });
   }
 });
 
@@ -484,3 +488,4 @@ onBeforeUnmount(() => {
   window.removeEventListener('message', handleMessage);
 });
 </script>
+
