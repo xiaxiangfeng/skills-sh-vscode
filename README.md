@@ -1,5 +1,10 @@
 # skills.sh - Skills Browser (VS Code Extension)
 
+<p align="center">
+  <img src="docs/images/skills-sh-ui.png" alt="skills.sh UI - Browse" width="49%" />
+  <img src="docs/images/skills-sh-ui1.png" alt="skills.sh UI - Installed" width="49%" />
+</p>
+
 Browse, search, and install skills from skills.sh directly inside VS Code.  
 This extension provides a webview UI with tabs for All Time / Trending / Hot / Installed and a guided install flow that mirrors the `npx skills add` experience.
 
