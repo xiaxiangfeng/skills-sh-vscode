@@ -39,6 +39,7 @@ const path = __importStar(require("path"));
 const os = __importStar(require("os"));
 const fs = __importStar(require("fs"));
 const yaml_1 = require("yaml");
+const agentPathResolver_1 = require("./agentPathResolver");
 function parseFrontmatter(content) {
     const match = content.match(/^---\s*\n([\s\S]*?)\n---/);
     if (!match) {
@@ -74,7 +75,7 @@ async function readSkillLockMap() {
     }
     return map;
 }
-async function readSkillFile(skillMdPath, fallbackName, level, agent, agentLabel, lockMap) {
+async function readSkillFile(skillMdPath, fallbackName, level, agent, agentLabel, isUniversal, lockMap) {
     const fileUri = vscode.Uri.file(skillMdPath);
     let updatedAt;
     try {
@@ -96,12 +97,14 @@ async function readSkillFile(skillMdPath, fallbackName, level, agent, agentLabel
             level,
             agent,
             agentLabel,
+            isUniversal,
             updatedAt,
             source: lockEntry?.source,
             sourceUrl: lockEntry?.sourceUrl
         };
     }
     catch {
+        const lockEntry = lockMap.get(fallbackName.toLowerCase());
         return {
             name: fallbackName,
             description: '',
@@ -109,13 +112,14 @@ async function readSkillFile(skillMdPath, fallbackName, level, agent, agentLabel
             level,
             agent,
             agentLabel,
+            isUniversal,
             updatedAt,
-            source: lockMap.get(fallbackName.toLowerCase())?.source,
-            sourceUrl: lockMap.get(fallbackName.toLowerCase())?.sourceUrl
+            source: lockEntry?.source,
+            sourceUrl: lockEntry?.sourceUrl
         };
     }
 }
-async function scanDirectory(dirPath, level, agent, agentLabel, lockMap) {
+async function scanDirectory(dirPath, level, agent, agentLabel, isUniversal, lockMap) {
     const skills = [];
     const dirUri = vscode.Uri.file(dirPath);
     try {
@@ -152,7 +156,7 @@ async function scanDirectory(dirPath, level, agent, agentLabel, lockMap) {
                 continue;
             }
             const skillMdPath = path.join(dirPath, name, skillFile);
-            skills.push(await readSkillFile(skillMdPath, name, level, agent, agentLabel, lockMap));
+            skills.push(await readSkillFile(skillMdPath, name, level, agent, agentLabel, isUniversal, lockMap));
             continue;
         }
         if ((type & vscode.FileType.File) === 0) {
@@ -164,26 +168,35 @@ async function scanDirectory(dirPath, level, agent, agentLabel, lockMap) {
         }
         const skillMdPath = path.join(dirPath, name);
         const fallbackName = path.basename(name, path.extname(name));
-        skills.push(await readSkillFile(skillMdPath, fallbackName, level, agent, agentLabel, lockMap));
+        skills.push(await readSkillFile(skillMdPath, fallbackName, level, agent, agentLabel, isUniversal, lockMap));
     }
     return skills;
 }
-function resolveProjectSkillsDir(agent, workspaceRoot) {
-    const skillsDir = agent.skillsDir?.trim();
-    if (!skillsDir)
-        return undefined;
-    return path.isAbsolute(skillsDir) ? skillsDir : path.join(workspaceRoot, skillsDir);
+function normalizePathKey(value) {
+    return path.normalize(path.resolve(value)).toLowerCase();
 }
-function resolveUserSkillsDir(agent) {
-    const homeDir = os.homedir();
+function buildSkillDedupKey(skill) {
+    return [
+        skill.level,
+        skill.agent.toLowerCase(),
+        normalizePathKey(skill.path),
+        skill.name.toLowerCase()
+    ].join('|');
+}
+function resolveAgentGlobalDir(agent, homeDir) {
     const globalDir = agent.globalSkillsDir?.trim();
-    if (globalDir) {
-        return path.isAbsolute(globalDir) ? globalDir : path.join(homeDir, globalDir);
-    }
-    const skillsDir = agent.skillsDir?.trim();
-    if (!skillsDir)
+    if (!globalDir) {
         return undefined;
-    return path.isAbsolute(skillsDir) ? skillsDir : path.join(homeDir, skillsDir);
+    }
+    return path.isAbsolute(globalDir) ? globalDir : path.join(homeDir, globalDir);
+}
+function mapSkillsToAgent(skills, agent) {
+    return skills.map((skill) => ({
+        ...skill,
+        agent: agent.name,
+        agentLabel: agent.displayName,
+        isUniversal: false
+    }));
 }
 async function scanInstalledSkills(agents) {
     const allSkills = [];
@@ -192,21 +205,90 @@ async function scanInstalledSkills(agents) {
     }
     const lockMap = await readSkillLockMap();
     const workspaceRoots = (vscode.workspace.workspaceFolders || []).map((folder) => folder.uri.fsPath);
+    const seenSkillKeys = new Map();
+    const homeDir = os.homedir();
+    const mergeSkills = (skills) => {
+        for (const skill of skills) {
+            const key = buildSkillDedupKey(skill);
+            if (!seenSkillKeys.has(key)) {
+                seenSkillKeys.set(key, allSkills.length);
+                allSkills.push(skill);
+            }
+        }
+    };
     for (const agent of agents) {
-        const agentName = agent.name;
-        const agentLabel = agent.displayName;
         for (const root of workspaceRoots) {
-            const dirPath = resolveProjectSkillsDir(agent, root);
+            const dirPath = (0, agentPathResolver_1.resolveInstallDir)({
+                agent,
+                level: 'project',
+                workspaceRoot: root,
+                homeDir
+            });
             if (!dirPath)
                 continue;
-            const skills = await scanDirectory(dirPath, 'project', agentName, agentLabel, lockMap);
-            allSkills.push(...skills);
+            const skills = await scanDirectory(dirPath, 'project', agent.name, agent.displayName, false, lockMap);
+            mergeSkills(skills);
         }
-        const userDir = resolveUserSkillsDir(agent);
-        if (userDir) {
-            const skills = await scanDirectory(userDir, 'user', agentName, agentLabel, lockMap);
-            allSkills.push(...skills);
+    }
+    const scannedUserDirs = new Map();
+    let universalDirKey;
+    const firstUniversalAgent = agents.find((agent) => (0, agentPathResolver_1.isUniversalAgent)(agent));
+    if (firstUniversalAgent) {
+        const universalDir = (0, agentPathResolver_1.resolveInstallDir)({
+            agent: firstUniversalAgent,
+            level: 'user',
+            homeDir
+        });
+        if (universalDir) {
+            universalDirKey = normalizePathKey(universalDir);
+            const universalSkills = await scanDirectory(universalDir, 'user', agentPathResolver_1.UNIVERSAL_AGENT_ID, agentPathResolver_1.UNIVERSAL_AGENT_LABEL, true, lockMap);
+            scannedUserDirs.set(universalDirKey, universalSkills);
+            mergeSkills(universalSkills);
         }
+    }
+    for (const agent of agents) {
+        if (!(0, agentPathResolver_1.isUniversalAgent)(agent)) {
+            continue;
+        }
+        const globalDir = resolveAgentGlobalDir(agent, homeDir);
+        if (!globalDir) {
+            continue;
+        }
+        const dirKey = normalizePathKey(globalDir);
+        if (universalDirKey && dirKey === universalDirKey) {
+            continue;
+        }
+        const cachedSkills = scannedUserDirs.get(dirKey);
+        if (cachedSkills) {
+            mergeSkills(mapSkillsToAgent(cachedSkills, agent));
+            continue;
+        }
+        scannedUserDirs.set(dirKey, []);
+        const skills = await scanDirectory(globalDir, 'user', agent.name, agent.displayName, false, lockMap);
+        scannedUserDirs.set(dirKey, skills);
+        mergeSkills(skills);
+    }
+    for (const agent of agents) {
+        if ((0, agentPathResolver_1.isUniversalAgent)(agent)) {
+            continue;
+        }
+        const userDir = (0, agentPathResolver_1.resolveInstallDir)({
+            agent,
+            level: 'user',
+            homeDir
+        });
+        if (!userDir)
+            continue;
+        const dirKey = normalizePathKey(userDir);
+        const cachedSkills = scannedUserDirs.get(dirKey);
+        if (cachedSkills) {
+            mergeSkills(mapSkillsToAgent(cachedSkills, agent));
+            continue;
+        }
+        scannedUserDirs.set(dirKey, []);
+        const skills = await scanDirectory(userDir, 'user', agent.name, agent.displayName, false, lockMap);
+        scannedUserDirs.set(dirKey, skills);
+        mergeSkills(skills);
     }
     return allSkills;
 }

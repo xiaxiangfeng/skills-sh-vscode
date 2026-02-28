@@ -17,6 +17,7 @@ export interface Skill {
   level: SkillLevel;
   agent: AgentType;
   agentLabel?: string;
+  isUniversal?: boolean;
   updatedAt?: number;
   source?: string;
   sourceUrl?: string;

@@ -54,9 +54,12 @@
       <div class="toolbar">
         <label class="toolbar-label" for="installed-sort">Sort</label>
         <select id="installed-sort" v-model="installedSort">
-          <option value="type">Type</option>
-          <option value="time">Time</option>
+          <option value="time">Install Time</option>
+          <option value="name">Name</option>
         </select>
+      </div>
+      <div class="installed-hint">
+        Universal agents: {{ universalAgentsText }}
       </div>
       <div v-if="updatesCount" class="update-banner">
         <span>{{ updatesCount }} update(s) available</span>
@@ -68,12 +71,24 @@
 
         <SkillList
           v-else
-          :items="installedSort === 'time' ? installedByTime : undefined"
-          :groups="installedSort === 'type' ? installedGroups : undefined"
+          :items="installedItems"
           variant="installed"
           :itemMapper="installedItemMapper"
           @click-item="onInstalledItemClick"
         >
+          <template #details="{ item }">
+            <div class="installed-agent-list">
+              <button
+                v-for="entry in getInstalledAgentEntries(item)"
+                :key="entry.key"
+                class="agent-chip"
+                @click.stop="openAgentSkill(entry.path)"
+                :title="`Open ${entry.label} SKILL.md`"
+              >
+                {{ entry.label }}
+              </button>
+            </div>
+          </template>
           <template #actions="{ item }">
             <button
               v-if="getReinstallPayload(item)"
@@ -110,13 +125,13 @@ const persisted = vscode.getState() || {};
 const activeTab = ref<ActiveTab>((persisted.activeTab as ActiveTab) || 'all');
 const searchInput = ref<string>((persisted.searchInput as string) || (persisted.searchQuery as string) || '');
 const searchQuery = ref<string>((persisted.searchQuery as string) || '');
-const installedSort = ref<'type' | 'time'>((persisted.installedSort as 'type' | 'time') || 'type');
+const installedSort = ref<'time' | 'name'>((persisted.installedSort as 'time' | 'name') || 'time');
 
 if (!['all', 'trending', 'hot', 'installed'].includes(activeTab.value)) {
   activeTab.value = 'all';
 }
-if (!['type', 'time'].includes(installedSort.value)) {
-  installedSort.value = 'type';
+if (!['time', 'name'].includes(installedSort.value)) {
+  installedSort.value = 'time';
 }
 
 const state = ref<WebviewState>(createEmptyState());
@@ -130,12 +145,27 @@ const agentLabelMap = computed(() => {
   return map;
 });
 
+function isUniversalAgentDefinition(agent: AgentDefinition) {
+  return agent.skillsDir.trim().replace(/\\/g, '/').replace(/\/+/g, '/').toLowerCase() === '.agents/skills';
+}
+
+const universalAgentsText = computed(() => {
+  const names = agentDefinitions.value
+    .filter((agent) => isUniversalAgentDefinition(agent))
+    .map((agent) => agent.displayName)
+    .sort((a, b) => a.localeCompare(b));
+
+  return names.length > 0 ? names.join(', ') : 'None';
+});
+
+const installedCount = computed(() => filteredInstalled.value.length);
+
 const tabs = computed(() => {
   const counts = {
     all: formatCount(state.value.marketplace.all.totalCount ?? state.value.marketplace.all.skills.length),
     trending: formatCount(state.value.marketplace.trending.skills.length),
     hot: formatCount(state.value.marketplace.hot.skills.length),
-    installed: formatCount(state.value.installed.length)
+    installed: formatCount(installedCount.value)
   };
 
   return [
@@ -169,62 +199,94 @@ const marketplaceIndex = computed(() => {
   return index;
 });
 
+type InstalledListItem = InstalledSkill & {
+  installedAgentEntries: InstalledAgentEntry[];
+  installedAgents: string[];
+  installedAgentKeys: string[];
+};
+
+type InstalledAgentEntry = {
+  key: string;
+  label: string;
+  path: string;
+};
+
+const mergedInstalled = computed<InstalledListItem[]>(() => {
+  const map = new Map<string, InstalledListItem>();
+
+  state.value.installed.forEach((skill) => {
+    const key = (skill.name || '').toLowerCase();
+    const agentLabel = skill.isUniversal
+      ? 'Universal (.agents/skills)'
+      : getAgentLabel(skill.agent, skill.agentLabel);
+    const agentKey = `${skill.level}:${skill.agent}`;
+
+    if (!map.has(key)) {
+      map.set(key, {
+        ...skill,
+        installedAgentEntries: [{ key: agentKey, label: agentLabel, path: skill.path }],
+        installedAgents: [agentLabel],
+        installedAgentKeys: [agentKey]
+      });
+      return;
+    }
+
+    const current = map.get(key)!;
+    if (skill.description && !current.description) {
+      current.description = skill.description;
+    }
+
+    const currentUpdatedAt = current.updatedAt || 0;
+    const nextUpdatedAt = skill.updatedAt || 0;
+    if (nextUpdatedAt > currentUpdatedAt) {
+      current.updatedAt = skill.updatedAt;
+      current.path = skill.path;
+      current.source = skill.source || current.source;
+      current.sourceUrl = skill.sourceUrl || current.sourceUrl;
+    }
+
+    if (!current.installedAgentKeys.includes(agentKey)) {
+      current.installedAgentKeys.push(agentKey);
+      current.installedAgents.push(agentLabel);
+      current.installedAgentEntries.push({
+        key: agentKey,
+        label: agentLabel,
+        path: skill.path
+      });
+    }
+  });
+
+  return [...map.values()].map((item) => ({
+    ...item,
+    installedAgentEntries: [...item.installedAgentEntries].sort((a, b) =>
+      a.label.localeCompare(b.label)
+    ),
+    installedAgents: [...item.installedAgents].sort((a, b) => a.localeCompare(b))
+  }));
+});
+
 const filteredInstalled = computed(() => {
   const query = searchQuery.value.trim().toLowerCase();
-  if (!query) return [...state.value.installed];
-  return state.value.installed.filter((skill) =>
+  if (!query) return [...mergedInstalled.value];
+  return mergedInstalled.value.filter((skill) =>
     (skill.name || '').toLowerCase().includes(query) ||
-    (skill.description || '').toLowerCase().includes(query)
+    (skill.description || '').toLowerCase().includes(query) ||
+    skill.installedAgents.some((agent) => agent.toLowerCase().includes(query))
   );
 });
 
-const installedByTime = computed(() => {
-  return [...filteredInstalled.value].sort((a, b) => {
+const installedItems = computed(() => {
+  const list = [...filteredInstalled.value];
+  if (installedSort.value === 'name') {
+    return list.sort((a, b) => String(a.name).localeCompare(String(b.name)));
+  }
+
+  return list.sort((a, b) => {
     const at = a.updatedAt || 0;
     const bt = b.updatedAt || 0;
     if (bt !== at) return bt - at;
     return String(a.name).localeCompare(String(b.name));
   });
-});
-
-const installedGroups = computed(() => {
-  const grouped: Record<string, InstalledSkill[]> = {};
-  filteredInstalled.value.forEach((skill) => {
-    const key = `${skill.level}|${skill.agent}`;
-    if (!grouped[key]) {
-      grouped[key] = [];
-    }
-    grouped[key].push(skill);
-  });
-
-  const groups: Array<{ key: string; label: string; skills: InstalledSkill[] }> = [];
-  const orderedKeys = new Set<string>();
-
-  (['project', 'user'] as const).forEach((level) => {
-    agentDefinitions.value.forEach((agent) => {
-      const key = `${level}|${agent.name}`;
-      const skills = grouped[key];
-      if (!skills || skills.length === 0) return;
-      const sorted = [...skills].sort((a, b) => String(a.name).localeCompare(String(b.name)));
-      groups.push({
-        key,
-        label: `${level === 'project' ? 'Project' : 'User'} / ${agent.displayName}`,
-        skills: sorted
-      });
-      orderedKeys.add(key);
-    });
-  });
-
-  Object.entries(grouped).forEach(([key, skills]) => {
-    if (orderedKeys.has(key) || skills.length === 0) return;
-    const sample = skills[0];
-    const agentLabel = getAgentLabel(sample.agent, sample.agentLabel);
-    const levelLabel = sample.level === 'project' ? 'Project' : 'User';
-    const sorted = [...skills].sort((a, b) => String(a.name).localeCompare(String(b.name)));
-    groups.push({ key, label: `${levelLabel} / ${agentLabel}`, skills: sorted });
-  });
-
-  return groups;
 });
 
 const installedEmptyMessage = computed(() => {
@@ -290,6 +352,11 @@ function persistState() {
 
 function setActiveTab(tab: ActiveTab) {
   activeTab.value = tab;
+  if (tab === 'installed' && (searchInput.value.trim() || searchQuery.value.trim())) {
+    searchInput.value = '';
+    searchQuery.value = '';
+    vscode.postMessage({ command: 'search', query: '' });
+  }
 }
 
 function formatCount(value?: number) {
@@ -303,7 +370,7 @@ function getMarketplaceMatch(name: string) {
   return marketplaceIndex.value.get(name);
 }
 
-function getReinstallPayload(skill: InstalledSkill): { repo: string; skill?: string } | undefined {
+function getReinstallPayload(skill: InstalledListItem): { repo: string; skill?: string } | undefined {
   const market = getMarketplaceMatch(skill.name);
   if (market?.repo) {
     return { repo: market.repo, skill: skill.name };
@@ -324,13 +391,13 @@ function isDirectSkillUrl(value: string): boolean {
   return value.toLowerCase().endsWith('/skill.md');
 }
 
-function reinstallSkill(skill: InstalledSkill) {
+function reinstallSkill(skill: InstalledListItem) {
   const payload = getReinstallPayload(skill);
   if (!payload) return;
   installSkill(payload.repo, payload.skill);
 }
 
-function isUpdateAvailable(skill: InstalledSkill): boolean {
+function isUpdateAvailable(skill: InstalledListItem): boolean {
   if (updatesIndex.value.has(skill.name)) {
     return true;
   }
@@ -360,15 +427,8 @@ function formatDate(value?: number) {
   return new Date(value).toLocaleDateString();
 }
 
-function buildInstalledSubtitle(skill: InstalledSkill) {
-  const parts = [skill.description || 'No description', getTypeLabel(skill)];
-  return parts.filter(Boolean).join(' - ');
-}
-
-function getTypeLabel(skill: InstalledSkill) {
-  const levelLabel = skill.level === 'project' ? 'Project' : 'User';
-  const agentLabel = getAgentLabel(skill.agent, skill.agentLabel);
-  return `${levelLabel} / ${agentLabel}`;
+function buildInstalledSubtitle(skill: InstalledListItem) {
+  return skill.description || 'No description';
 }
 
 function getAgentLabel(agent: string, fallback?: string) {
@@ -396,7 +456,17 @@ function openUrl(url: string) {
   vscode.postMessage({ command: 'openUrl', url });
 }
 
-function deleteSkill(skill: InstalledSkill) {
+function openAgentSkill(path: string) {
+  if (!path) return;
+  vscode.postMessage({ command: 'openSkill', path });
+}
+
+function getInstalledAgentEntries(item: MarketplaceSkill | InstalledListItem): InstalledAgentEntry[] {
+  const skill = item as InstalledListItem;
+  return skill.installedAgentEntries || [];
+}
+
+function deleteSkill(skill: InstalledListItem) {
   vscode.postMessage({ command: 'deleteSkill', path: skill.path, name: skill.name });
 }
 
@@ -424,13 +494,13 @@ function onMarketplaceItemClick(item: any) { // using any for convenience as ite
 }
 
 function onInstalledItemClick(item: any) {
-    const skill = item as InstalledSkill;
+    const skill = item as InstalledListItem;
     openSkill(skill.path);
 }
 
 // Mapper for SkillList to render installed items correctly
-function installedItemMapper(item: MarketplaceSkill | InstalledSkill) {
-  const skill = item as InstalledSkill;
+function installedItemMapper(item: MarketplaceSkill | InstalledListItem) {
+  const skill = item as InstalledListItem;
   const metaParts = [formatDate(skill.updatedAt)];
   if (isUpdateAvailable(skill)) {
     metaParts.push('Update available');
@@ -438,7 +508,8 @@ function installedItemMapper(item: MarketplaceSkill | InstalledSkill) {
   return {
     title: skill.name,
     subtitle: buildInstalledSubtitle(skill),
-    meta: metaParts.filter(Boolean).join(' - ')
+    meta: metaParts.filter(Boolean).join(' - '),
+    titleClickable: false
   };
 }
 

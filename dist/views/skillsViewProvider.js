@@ -113,6 +113,9 @@ class SkillsViewProvider {
                 case 'openSkill':
                     this.openSkill(message.path);
                     break;
+                case 'openSkillDir':
+                    this.openSkillDir(message.path);
+                    break;
                 case 'refresh':
                     await this.refresh(true);
                     break;
@@ -379,6 +382,14 @@ class SkillsViewProvider {
             vscode.window.showTextDocument(doc);
         });
     }
+    openSkillDir(skillPath) {
+        if (!skillPath)
+            return;
+        const normalizedPath = path.normalize(skillPath);
+        const isMarkdown = path.extname(normalizedPath).toLowerCase() === '.md';
+        const targetDir = isMarkdown ? path.dirname(normalizedPath) : normalizedPath;
+        vscode.commands.executeCommand('revealInExplorer', vscode.Uri.file(targetDir));
+    }
     async deleteSkill(skillPath, name) {
         if (!skillPath || !name)
             return;
@@ -529,7 +540,11 @@ class SkillsViewProvider {
         return updates;
     }
     stripAnsi(value) {
-        return value.replace(/\u001b\[[0-9;]*m/g, '');
+        let cleaned = value.replace(/\u001b\[[0-9;?]*[ -/]*[@-~]/g, '');
+        cleaned = cleaned.replace(/\[(?:\d{1,3};)*\d{1,3}m/g, '');
+        cleaned = cleaned.replace(/\[\?25[hl]/gi, '');
+        cleaned = cleaned.replace(/\[\]/g, '');
+        return cleaned;
     }
     extractUpdateName(value) {
         const cleaned = value.replace(/^[^A-Za-z0-9]+/, '').trim();
@@ -558,12 +573,18 @@ class SkillsViewProvider {
             child.stdout?.on('data', (data) => {
                 const text = data.toString();
                 stdout += text;
-                this.output.append(text);
+                const cleaned = this.cleanOutputForChannel(text);
+                if (cleaned) {
+                    this.output.append(cleaned);
+                }
             });
             child.stderr?.on('data', (data) => {
                 const text = data.toString();
                 stderr += text;
-                this.output.append(text);
+                const cleaned = this.cleanOutputForChannel(text);
+                if (cleaned) {
+                    this.output.append(cleaned);
+                }
             });
             child.on('error', (error) => {
                 resolve({ code: -1, stdout, stderr, error: error.message });
@@ -593,6 +614,17 @@ class SkillsViewProvider {
                 this.output.show(true);
             }
         });
+    }
+    cleanOutputForChannel(text) {
+        if (!text)
+            return '';
+        let cleaned = text.replace(/\u001b\[[0-9;?]*[ -/]*[@-~]/g, '');
+        cleaned = cleaned.replace(/\[(?:\d{1,3};)*\d{1,3}m/g, '');
+        cleaned = cleaned.replace(/\[\?25[hl]/gi, '');
+        cleaned = cleaned.replace(/\[\]/g, '');
+        cleaned = cleaned.replace(/\r(?!\n)/g, '\n');
+        cleaned = cleaned.replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g, '');
+        return cleaned;
     }
     updateWebview() {
         if (!this.view)

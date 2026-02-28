@@ -110,6 +110,9 @@ export class SkillsViewProvider implements vscode.WebviewViewProvider {
         case 'openSkill':
           this.openSkill(message.path);
           break;
+        case 'openSkillDir':
+          this.openSkillDir(message.path);
+          break;
         case 'refresh':
           await this.refresh(true);
           break;
@@ -409,6 +412,16 @@ export class SkillsViewProvider implements vscode.WebviewViewProvider {
     });
   }
 
+  private openSkillDir(skillPath: string) {
+    if (!skillPath) return;
+
+    const normalizedPath = path.normalize(skillPath);
+    const isMarkdown = path.extname(normalizedPath).toLowerCase() === '.md';
+    const targetDir = isMarkdown ? path.dirname(normalizedPath) : normalizedPath;
+
+    vscode.commands.executeCommand('revealInExplorer', vscode.Uri.file(targetDir));
+  }
+
   private async deleteSkill(skillPath: string, name: string) {
     if (!skillPath || !name) return;
 
@@ -596,7 +609,11 @@ export class SkillsViewProvider implements vscode.WebviewViewProvider {
   }
 
   private stripAnsi(value: string): string {
-    return value.replace(/\u001b\[[0-9;]*m/g, '');
+    let cleaned = value.replace(/\u001b\[[0-9;?]*[ -/]*[@-~]/g, '');
+    cleaned = cleaned.replace(/\[(?:\d{1,3};)*\d{1,3}m/g, '');
+    cleaned = cleaned.replace(/\[\?25[hl]/gi, '');
+    cleaned = cleaned.replace(/\[\]/g, '');
+    return cleaned;
   }
 
   private extractUpdateName(value: string): string | undefined {
@@ -634,13 +651,19 @@ export class SkillsViewProvider implements vscode.WebviewViewProvider {
       child.stdout?.on('data', (data) => {
         const text = data.toString();
         stdout += text;
-        this.output.append(text);
+        const cleaned = this.cleanOutputForChannel(text);
+        if (cleaned) {
+          this.output.append(cleaned);
+        }
       });
 
       child.stderr?.on('data', (data) => {
         const text = data.toString();
         stderr += text;
-        this.output.append(text);
+        const cleaned = this.cleanOutputForChannel(text);
+        if (cleaned) {
+          this.output.append(cleaned);
+        }
       });
 
       child.on('error', (error) => {
@@ -674,6 +697,18 @@ export class SkillsViewProvider implements vscode.WebviewViewProvider {
           this.output.show(true);
         }
       });
+  }
+
+  private cleanOutputForChannel(text: string): string {
+    if (!text) return '';
+
+    let cleaned = text.replace(/\u001b\[[0-9;?]*[ -/]*[@-~]/g, '');
+    cleaned = cleaned.replace(/\[(?:\d{1,3};)*\d{1,3}m/g, '');
+    cleaned = cleaned.replace(/\[\?25[hl]/gi, '');
+    cleaned = cleaned.replace(/\[\]/g, '');
+    cleaned = cleaned.replace(/\r(?!\n)/g, '\n');
+    cleaned = cleaned.replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g, '');
+    return cleaned;
   }
 
   private updateWebview() {

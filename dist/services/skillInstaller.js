@@ -35,11 +35,10 @@ var __importStar = (this && this.__importStar) || (function () {
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.SkillInstaller = void 0;
 const vscode = __importStar(require("vscode"));
-const fs = __importStar(require("fs"));
 const os = __importStar(require("os"));
-const path = __importStar(require("path"));
 const child_process_1 = require("child_process");
 const agentRegistry_1 = require("./agentRegistry");
+const agentPathResolver_1 = require("./agentPathResolver");
 class SkillInstaller {
     context;
     output;
@@ -56,11 +55,7 @@ class SkillInstaller {
         const selection = await this.promptForSelection();
         if (!selection)
             return false;
-        const didInstall = await this.runInstall(options, selection);
-        if (didInstall && selection.method === 'copy') {
-            await this.convertSymlinksToCopies(selection);
-        }
-        return didInstall;
+        return this.runInstall(options, selection);
     }
     async promptForSelection() {
         const agents = await this.promptForAgents();
@@ -92,53 +87,80 @@ class SkillInstaller {
             vscode.window.showErrorMessage('No agents are available.');
             return undefined;
         }
-        const lastSelected = this.context.globalState.get('skillsSh.lastSelectedAgents', []);
-        const choice = await vscode.window.showQuickPick([
-            {
-                label: 'Same as last time (Recommended)',
-                description: lastSelected.length > 0 ? `${lastSelected.length} agents` : 'No previous selection',
-                target: 'last'
-            },
-            { label: 'All detected agents', description: 'Based on local agent folders', target: 'detected' },
-            { label: 'Select specific agents', description: 'Choose from the full list', target: 'specific' }
-        ], { title: 'Install to' });
-        if (!choice)
-            return undefined;
-        if (choice.target === 'last' && lastSelected.length > 0) {
-            const picked = agents.filter((agent) => lastSelected.includes(agent.name));
-            if (picked.length > 0) {
-                return picked;
-            }
-        }
-        if (choice.target === 'detected') {
-            const workspaceRoot = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
-            const detected = (0, agentRegistry_1.detectAgents)(agents, workspaceRoot);
-            if (detected.length > 0) {
-                void this.context.globalState.update('skillsSh.lastSelectedAgents', detected.map((agent) => agent.name));
-                return detected;
-            }
-            vscode.window.showWarningMessage('No detected agents found. Please select specific agents.');
-        }
-        return this.promptForSpecificAgents(agents, lastSelected);
+        return this.promptForSpecificAgents(agents);
     }
-    async promptForSpecificAgents(agents, lastSelected) {
-        const items = agents.map((agent) => ({
-            label: agent.displayName,
-            description: agent.skillsDir,
-            agent
-        }));
+    async promptForSpecificAgents(agents) {
+        const universalItems = [];
+        const additionalItems = [];
+        for (const agent of agents) {
+            const universal = (0, agentPathResolver_1.isUniversalAgent)(agent);
+            const item = {
+                label: agent.displayName,
+                description: `${agent.name} (${agent.skillsDir})`,
+                detail: universal ? `${agentPathResolver_1.UNIVERSAL_AGENT_LABEL} - shared directory` : undefined,
+                agent,
+                alwaysIncluded: universal
+            };
+            if (universal) {
+                universalItems.push(item);
+            }
+            else {
+                additionalItems.push(item);
+            }
+        }
+        const allItems = [];
+        if (universalItems.length > 0) {
+            allItems.push({
+                label: 'Universal (.agents/skills) - always included',
+                kind: vscode.QuickPickItemKind.Separator
+            });
+            allItems.push(...universalItems);
+        }
+        if (additionalItems.length > 0) {
+            allItems.push({ label: 'Additional agents', kind: vscode.QuickPickItemKind.Separator });
+            allItems.push(...additionalItems);
+        }
+        const enforceUniversalSelection = (selection) => {
+            if (universalItems.length === 0) {
+                return [...selection];
+            }
+            const merged = [...selection];
+            for (const lockedItem of universalItems) {
+                if (!merged.includes(lockedItem)) {
+                    merged.push(lockedItem);
+                }
+            }
+            return merged;
+        };
         const selected = await new Promise((resolve) => {
             const quickPick = vscode.window.createQuickPick();
             let accepted = false;
             quickPick.title = 'Select agents to install skills to';
+            quickPick.placeholder =
+                universalItems.length > 0
+                    ? `Universal agents are preselected and shared via ${(0, agentPathResolver_1.getUniversalUserSkillsDir)()}.`
+                    : 'Select one or more agents.';
             quickPick.canSelectMany = true;
-            quickPick.items = items;
-            quickPick.selectedItems = items.filter((item) => lastSelected.includes(item.agent.name));
+            quickPick.items = allItems;
+            quickPick.selectedItems = [...universalItems];
+            quickPick.onDidChangeSelection((selection) => {
+                const merged = enforceUniversalSelection(selection);
+                if (merged.length !== selection.length) {
+                    quickPick.selectedItems = merged;
+                }
+            });
             quickPick.onDidAccept(() => {
+                const merged = enforceUniversalSelection(quickPick.selectedItems);
+                const pickedAgents = merged
+                    .map((item) => item.agent)
+                    .filter((agent) => Boolean(agent));
+                if (pickedAgents.length === 0) {
+                    vscode.window.showWarningMessage('Select at least one agent.');
+                    return;
+                }
                 accepted = true;
-                const selection = [...quickPick.selectedItems];
                 quickPick.hide();
-                resolve(selection);
+                resolve(pickedAgents);
             });
             quickPick.onDidHide(() => {
                 if (!accepted)
@@ -149,9 +171,7 @@ class SkillInstaller {
         });
         if (!selected || selected.length === 0)
             return undefined;
-        const picked = selected.map((item) => item.agent);
-        void this.context.globalState.update('skillsSh.lastSelectedAgents', picked.map((agent) => agent.name));
-        return picked;
+        return selected;
     }
     async promptForScope() {
         const workspaceFolders = vscode.workspace.workspaceFolders || [];
@@ -228,6 +248,9 @@ class SkillInstaller {
         for (const agent of selection.agents) {
             args.push('-a', agent.name);
         }
+        if (selection.method === 'copy') {
+            args.push('--copy');
+        }
         args.push('-y');
         const cwd = this.resolveCwd(selection, cwdMode);
         if (!cwd) {
@@ -252,13 +275,19 @@ class SkillInstaller {
             child.stdout?.on('data', (data) => {
                 const text = data.toString();
                 outputBuffer += text;
-                this.output.append(text);
+                const cleaned = this.cleanOutputForChannel(text);
+                if (cleaned) {
+                    this.output.append(cleaned);
+                }
             });
             child.stderr?.on('data', (data) => {
                 const text = data.toString();
                 stderr += text;
                 outputBuffer += text;
-                this.output.append(text);
+                const cleaned = this.cleanOutputForChannel(text);
+                if (cleaned) {
+                    this.output.append(cleaned);
+                }
             });
             child.on('error', (error) => {
                 const message = `Install failed: ${error.message}`;
@@ -271,13 +300,11 @@ class SkillInstaller {
             });
             child.on('close', (code) => {
                 if (code === 0) {
-                    const paths = this.buildInstallPaths(options, selection);
-                    if (paths.length > 0) {
-                        this.output.appendLine('');
-                        this.output.appendLine('[install] Installed paths:');
-                        paths.forEach((installedPath) => this.output.appendLine(`- ${installedPath}`));
-                    }
-                    const message = this.buildSuccessMessage(paths);
+                    this.output.appendLine('');
+                    this.output.appendLine('[install] CLI determines final install locations.');
+                    this.output.appendLine(`[install] Universal agents use ${(0, agentPathResolver_1.getUniversalUserSkillsDir)()}`);
+                    this.output.appendLine('[install] Non-universal agents may be linked or copied to their own directories.');
+                    const message = 'Skill installation complete. Final paths follow skills CLI semantics.';
                     vscode.window.showInformationMessage(message, 'Show Output').then((action) => {
                         if (action) {
                             this.output.show(true);
@@ -341,118 +368,47 @@ class SkillInstaller {
         }
         return workspaceRoot || os.homedir() || this.context.extensionPath;
     }
-    async convertSymlinksToCopies(selection) {
-        const workspaceRoot = selection.workspaceRoot;
-        const baseDir = selection.level === 'project' ? workspaceRoot : os.homedir();
-        if (!baseDir)
-            return;
-        for (const agent of selection.agents) {
-            const skillsDir = this.getAgentSkillsDir(agent, selection);
-            if (!skillsDir)
-                continue;
-            let entries = [];
-            try {
-                entries = await fs.promises.readdir(skillsDir, { withFileTypes: true });
-            }
-            catch {
-                continue;
-            }
-            for (const entry of entries) {
-                const entryPath = path.join(skillsDir, entry.name);
-                try {
-                    const stats = await fs.promises.lstat(entryPath);
-                    if (stats.isSymbolicLink()) {
-                        const targetPath = await fs.promises.readlink(entryPath);
-                        const absoluteTarget = path.isAbsolute(targetPath)
-                            ? targetPath
-                            : path.resolve(path.dirname(entryPath), targetPath);
-                        await fs.promises.rm(entryPath, { force: true, recursive: true });
-                        await this.copyDirectory(absoluteTarget, entryPath);
-                    }
-                }
-                catch {
-                    continue;
-                }
-            }
-        }
-        try {
-            const agentsBaseDir = path.join(baseDir, '.agents');
-            if (fs.existsSync(agentsBaseDir)) {
-                await fs.promises.rm(agentsBaseDir, { recursive: true, force: true });
-            }
-        }
-        catch {
-        }
-    }
-    getAgentSkillsDir(agent, selection) {
-        const skillsDir = agent.skillsDir?.trim();
-        if (!skillsDir)
-            return undefined;
-        if (selection.level === 'project') {
-            if (!selection.workspaceRoot)
-                return undefined;
-            return path.join(selection.workspaceRoot, skillsDir);
-        }
-        const homeDir = os.homedir();
-        const globalDir = agent.globalSkillsDir?.trim();
-        if (globalDir) {
-            return path.isAbsolute(globalDir) ? globalDir : path.join(homeDir, globalDir);
-        }
-        return path.join(homeDir, skillsDir);
-    }
-    async copyDirectory(src, dest) {
-        await fs.promises.mkdir(dest, { recursive: true });
-        const entries = await fs.promises.readdir(src, { withFileTypes: true });
-        for (const entry of entries) {
-            const srcPath = path.join(src, entry.name);
-            const destPath = path.join(dest, entry.name);
-            if (entry.isDirectory()) {
-                await this.copyDirectory(srcPath, destPath);
-            }
-            else {
-                await fs.promises.copyFile(srcPath, destPath);
-            }
-        }
-    }
-    buildInstallPaths(options, selection) {
-        const skillName = options.skill?.trim();
-        const paths = [];
-        for (const agent of selection.agents) {
-            const baseDir = this.getAgentSkillsDir(agent, selection);
-            if (!baseDir)
-                continue;
-            paths.push(skillName ? path.join(baseDir, skillName) : baseDir);
-        }
-        const unique = Array.from(new Set(paths.map((value) => path.normalize(value))));
-        return unique;
-    }
-    buildSuccessMessage(paths) {
-        if (paths.length === 0) {
-            return 'Skill installation complete.';
-        }
-        const primary = paths[0];
-        if (paths.length === 1) {
-            return `Skill installed to ${primary}`;
-        }
-        return `Skill installed to ${primary} (+${paths.length - 1} more)`;
-    }
     buildFailureMessage(stderr, output, code) {
-        const detail = this.pickFailureDetail(stderr) || this.pickFailureDetail(output);
-        if (detail) {
-            return `Install failed: ${detail}`;
+        const details = [...this.pickFailureDetails(stderr), ...this.pickFailureDetails(output)];
+        const uniqueDetails = Array.from(new Set(details.map((line) => line.trim()).filter(Boolean)));
+        if (uniqueDetails.length > 0) {
+            const maxLines = 2;
+            const summary = uniqueDetails.slice(0, maxLines).join(' | ');
+            const suffix = uniqueDetails.length > maxLines ? ` (+${uniqueDetails.length - maxLines} more)` : '';
+            return `Install failed: ${summary}${suffix}`;
         }
         return `Install failed with code ${code}`;
     }
-    pickFailureDetail(text) {
-        const lines = text
+    pickFailureDetails(text) {
+        const cleanedText = this.cleanOutputForChannel(text);
+        const lines = cleanedText
             .split(/\r?\n/g)
             .map((line) => line.trim())
             .filter((line) => line.length > 0);
         if (lines.length === 0) {
-            return undefined;
+            return [];
         }
-        const errorLine = [...lines].reverse().find((line) => /error|failed|exception|denied/i.test(line));
-        return errorLine || lines[lines.length - 1];
+        const keywordLineRegex = /error|failed|exception|denied|not found|no matching|invalid|missing|unable/i;
+        const matched = lines.filter((line) => keywordLineRegex.test(line));
+        if (matched.length > 0) {
+            return matched.slice(-3);
+        }
+        return [lines[lines.length - 1]];
+    }
+    cleanOutputForChannel(text) {
+        if (!text)
+            return '';
+        // Output panel does not interpret ANSI; strip escape sequences first.
+        let cleaned = text.replace(/\u001b\[[0-9;?]*[ -/]*[@-~]/g, '');
+        // Some shells stringify color codes without ESC; remove leftover "[90m" fragments too.
+        cleaned = cleaned.replace(/\[(?:\d{1,3};)*\d{1,3}m/g, '');
+        cleaned = cleaned.replace(/\[\?25[hl]/gi, '');
+        cleaned = cleaned.replace(/\[\]/g, '');
+        // Normalize carriage-return based spinner updates so they don't render as control noise.
+        cleaned = cleaned.replace(/\r(?!\n)/g, '\n');
+        // Drop other non-printable control chars except tab/newline.
+        cleaned = cleaned.replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g, '');
+        return cleaned;
     }
 }
 exports.SkillInstaller = SkillInstaller;

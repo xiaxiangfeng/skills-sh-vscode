@@ -1,0 +1,235 @@
+[
+  {
+    "name": "amp",
+    "displayName": "Amp",
+    "skillsDir": ".agents/skills",
+    "globalSkillsDir": "C:\\Users\\10790\\.config\\agents\\skills"
+  },
+  {
+    "name": "antigravity",
+    "displayName": "Antigravity",
+    "skillsDir": ".agent/skills",
+    "globalSkillsDir": "C:\\Users\\10790\\.gemini\\antigravity\\skills"
+  },
+  {
+    "name": "augment",
+    "displayName": "Augment",
+    "skillsDir": ".augment/skills",
+    "globalSkillsDir": "C:\\Users\\10790\\.augment\\skills"
+  },
+  {
+    "name": "claude-code",
+    "displayName": "Claude Code",
+    "skillsDir": ".claude/skills",
+    "globalSkillsDir": "C:\\Users\\10790\\.claude\\skills"
+  },
+  {
+    "name": "openclaw",
+    "displayName": "OpenClaw",
+    "skillsDir": "skills",
+    "globalSkillsDir": "C:\\Users\\10790\\.moltbot\\skills"
+  },
+  {
+    "name": "cline",
+    "displayName": "Cline",
+    "skillsDir": ".agents/skills"
+  },
+  {
+    "name": "codebuddy",
+    "displayName": "CodeBuddy",
+    "skillsDir": ".codebuddy/skills",
+    "globalSkillsDir": "C:\\Users\\10790\\.codebuddy\\skills"
+  },
+  {
+    "name": "codex",
+    "displayName": "Codex",
+    "skillsDir": ".agents/skills",
+    "globalSkillsDir": "C:\\Users\\10790\\.codex\\skills"
+  },
+  {
+    "name": "command-code",
+    "displayName": "Command Code",
+    "skillsDir": ".commandcode/skills",
+    "globalSkillsDir": "C:\\Users\\10790\\.commandcode\\skills"
+  },
+  {
+    "name": "continue",
+    "displayName": "Continue",
+    "skillsDir": ".continue/skills",
+    "globalSkillsDir": "C:\\Users\\10790\\.continue\\skills"
+  },
+  {
+    "name": "cortex",
+    "displayName": "Cortex Code",
+    "skillsDir": ".cortex/skills",
+    "globalSkillsDir": "C:\\Users\\10790\\.snowflake\\cortex\\skills"
+  },
+  {
+    "name": "crush",
+    "displayName": "Crush",
+    "skillsDir": ".crush/skills",
+    "globalSkillsDir": "C:\\Users\\10790\\.config\\crush\\skills"
+  },
+  {
+    "name": "cursor",
+    "displayName": "Cursor",
+    "skillsDir": ".agents/skills",
+    "globalSkillsDir": "C:\\Users\\10790\\.cursor\\skills"
+  },
+  {
+    "name": "droid",
+    "displayName": "Droid",
+    "skillsDir": ".factory/skills",
+    "globalSkillsDir": "C:\\Users\\10790\\.factory\\skills"
+  },
+  {
+    "name": "gemini-cli",
+    "displayName": "Gemini CLI",
+    "skillsDir": ".agents/skills",
+    "globalSkillsDir": "C:\\Users\\10790\\.gemini\\skills"
+  },
+  {
+    "name": "github-copilot",
+    "displayName": "GitHub Copilot",
+    "skillsDir": ".agents/skills",
+    "globalSkillsDir": "C:\\Users\\10790\\.copilot\\skills"
+  },
+  {
+    "name": "goose",
+    "displayName": "Goose",
+    "skillsDir": ".goose/skills",
+    "globalSkillsDir": "C:\\Users\\10790\\.config\\goose\\skills"
+  },
+  {
+    "name": "junie",
+    "displayName": "Junie",
+    "skillsDir": ".junie/skills",
+    "globalSkillsDir": "C:\\Users\\10790\\.junie\\skills"
+  },
+  {
+    "name": "iflow-cli",
+    "displayName": "iFlow CLI",
+    "skillsDir": ".iflow/skills",
+    "globalSkillsDir": "C:\\Users\\10790\\.iflow\\skills"
+  },
+  {
+    "name": "kilo",
+    "displayName": "Kilo Code",
+    "skillsDir": ".kilocode/skills",
+    "globalSkillsDir": "C:\\Users\\10790\\.kilocode\\skills"
+  },
+  {
+    "name": "kimi-cli",
+    "displayName": "Kimi Code CLI",
+    "skillsDir": ".agents/skills",
+    "globalSkillsDir": "C:\\Users\\10790\\.config\\agents\\skills"
+  },
+  {
+    "name": "kiro-cli",
+    "displayName": "Kiro CLI",
+    "skillsDir": ".kiro/skills",
+    "globalSkillsDir": "C:\\Users\\10790\\.kiro\\skills"
+  },
+  {
+    "name": "kode",
+    "displayName": "Kode",
+    "skillsDir": ".kode/skills",
+    "globalSkillsDir": "C:\\Users\\10790\\.kode\\skills"
+  },
+  {
+    "name": "mcpjam",
+    "displayName": "MCPJam",
+    "skillsDir": ".mcpjam/skills",
+    "globalSkillsDir": "C:\\Users\\10790\\.mcpjam\\skills"
+  },
+  {
+    "name": "mistral-vibe",
+    "displayName": "Mistral Vibe",
+    "skillsDir": ".vibe/skills",
+    "globalSkillsDir": "C:\\Users\\10790\\.vibe\\skills"
+  },
+  {
+    "name": "mux",
+    "displayName": "Mux",
+    "skillsDir": ".mux/skills",
+    "globalSkillsDir": "C:\\Users\\10790\\.mux\\skills"
+  },
+  {
+    "name": "opencode",
+    "displayName": "OpenCode",
+    "skillsDir": ".agents/skills",
+    "globalSkillsDir": "C:\\Users\\10790\\.config\\opencode\\skills"
+  },
+  {
+    "name": "openhands",
+    "displayName": "OpenHands",
+    "skillsDir": ".openhands/skills",
+    "globalSkillsDir": "C:\\Users\\10790\\.openhands\\skills"
+  },
+  {
+    "name": "pi",
+    "displayName": "Pi",
+    "skillsDir": ".pi/skills",
+    "globalSkillsDir": "C:\\Users\\10790\\.pi\\agent\\skills"
+  },
+  {
+    "name": "qoder",
+    "displayName": "Qoder",
+    "skillsDir": ".qoder/skills",
+    "globalSkillsDir": "C:\\Users\\10790\\.qoder\\skills"
+  },
+  {
+    "name": "qwen-code",
+    "displayName": "Qwen Code",
+    "skillsDir": ".qwen/skills",
+    "globalSkillsDir": "C:\\Users\\10790\\.qwen\\skills"
+  },
+  {
+    "name": "roo",
+    "displayName": "Roo Code",
+    "skillsDir": ".roo/skills",
+    "globalSkillsDir": "C:\\Users\\10790\\.roo\\skills"
+  },
+  {
+    "name": "trae",
+    "displayName": "Trae",
+    "skillsDir": ".trae/skills",
+    "globalSkillsDir": "C:\\Users\\10790\\.trae\\skills"
+  },
+  {
+    "name": "trae-cn",
+    "displayName": "Trae CN",
+    "skillsDir": ".trae/skills",
+    "globalSkillsDir": "C:\\Users\\10790\\.trae-cn\\skills"
+  },
+  {
+    "name": "windsurf",
+    "displayName": "Windsurf",
+    "skillsDir": ".windsurf/skills",
+    "globalSkillsDir": "C:\\Users\\10790\\.codeium\\windsurf\\skills"
+  },
+  {
+    "name": "zencoder",
+    "displayName": "Zencoder",
+    "skillsDir": ".zencoder/skills",
+    "globalSkillsDir": "C:\\Users\\10790\\.zencoder\\skills"
+  },
+  {
+    "name": "neovate",
+    "displayName": "Neovate",
+    "skillsDir": ".neovate/skills",
+    "globalSkillsDir": "C:\\Users\\10790\\.neovate\\skills"
+  },
+  {
+    "name": "pochi",
+    "displayName": "Pochi",
+    "skillsDir": ".pochi/skills",
+    "globalSkillsDir": "C:\\Users\\10790\\.pochi\\skills"
+  },
+  {
+    "name": "adal",
+    "displayName": "AdaL",
+    "skillsDir": ".adal/skills",
+    "globalSkillsDir": "C:\\Users\\10790\\.adal\\skills"
+  }
+]

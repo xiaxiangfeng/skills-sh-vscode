@@ -47,8 +47,9 @@ async function loadAgentDefinitions(options = {}) {
             const content = await fs.promises.readFile(cliPath, 'utf8');
             const parsed = parseAgentsFromCli(content);
             if (parsed.length > 0) {
-                await writeCachedAgents(options.storagePath, parsed);
-                return parsed;
+                const merged = mergeCliAgentsWithBundled(parsed, bundled);
+                await writeCachedAgents(options.storagePath, merged);
+                return merged;
             }
         }
         catch {
@@ -61,6 +62,33 @@ async function loadAgentDefinitions(options = {}) {
         return bundled;
     }
     return [];
+}
+function mergeCliAgentsWithBundled(cliAgents, bundledAgents) {
+    if (!bundledAgents.length) {
+        return cliAgents;
+    }
+    const bundledByName = new Map();
+    for (const bundled of bundledAgents) {
+        bundledByName.set(bundled.name, bundled);
+    }
+    return cliAgents.map((agent) => {
+        if (agent.globalSkillsDir && agent.globalSkillsDir.trim()) {
+            return agent;
+        }
+        const bundled = bundledByName.get(agent.name);
+        if (!bundled) {
+            return agent;
+        }
+        const primaryDir = normalizeSlashes(agent.skillsDir || '').trim();
+        const fallbackDir = normalizeSlashes(bundled.globalSkillsDir || bundled.skillsDir || '').trim();
+        if (!fallbackDir || fallbackDir === primaryDir) {
+            return agent;
+        }
+        return {
+            ...agent,
+            globalSkillsDir: fallbackDir
+        };
+    });
 }
 function detectAgents(agents, workspaceRoot) {
     const homeDir = os.homedir();
@@ -138,15 +166,25 @@ function parseAgentsFromCli(content) {
     const agents = [];
     const seen = new Set();
     const pattern = /name:\s*"([^"]+)"\s*,\s*displayName:\s*"([^"]+)"\s*,\s*skillsDir:\s*"([^"]+)"/g;
+    const matches = [];
     let match;
     while ((match = pattern.exec(content)) !== null) {
         const name = match[1];
         const displayName = match[2];
         const skillsDir = match[3];
+        matches.push({ name, displayName, skillsDir, index: match.index });
+    }
+    for (let i = 0; i < matches.length; i++) {
+        const { name, displayName, skillsDir, index } = matches[i];
         if (!name || seen.has(name)) {
             continue;
         }
-        const globalSkillsDir = extractGlobalSkillsDir(content, match.index);
+        const nextStart = i + 1 < matches.length ? matches[i + 1].index : content.length;
+        const agentSlice = content.slice(index, nextStart);
+        if (/showInUniversalList:\s*false/.test(agentSlice)) {
+            continue;
+        }
+        const globalSkillsDir = extractGlobalSkillsDir(agentSlice);
         agents.push({
             name,
             displayName,
@@ -157,17 +195,52 @@ function parseAgentsFromCli(content) {
     }
     return agents;
 }
-function extractGlobalSkillsDir(content, startIndex) {
-    const slice = content.slice(startIndex, startIndex + 400);
-    const direct = slice.match(/globalSkillsDir:\s*"([^"]+)"/);
+function extractGlobalSkillsDir(agentSlice) {
+    const direct = agentSlice.match(/globalSkillsDir:\s*"([^"]+)"/);
     if (direct?.[1]) {
         return direct[1];
     }
-    const joined = slice.match(/globalSkillsDir:\s*join\([^,]+,\s*"([^"]+)"\)/);
-    if (joined?.[1]) {
-        return joined[1];
+    const joined = agentSlice.match(/globalSkillsDir:\s*join\(\s*([^,]+?)\s*,\s*"([^"]+)"\s*\)/);
+    if (joined?.[1] && joined?.[2]) {
+        return resolveGlobalJoinPath(joined[1], joined[2]);
+    }
+    if (/globalSkillsDir:\s*getOpenClawGlobalSkillsDir\(\)/.test(agentSlice)) {
+        return resolveOpenClawGlobalSkillsDir();
     }
     return undefined;
+}
+function resolveGlobalJoinPath(baseExpr, suffix) {
+    const base = resolveGlobalBasePath(baseExpr);
+    if (!base)
+        return undefined;
+    return path.join(base, normalizeSlashes(suffix));
+}
+function resolveGlobalBasePath(baseExpr) {
+    const normalized = baseExpr.replace(/\s+/g, '');
+    if (normalized === 'home' || normalized.includes('homedir()')) {
+        return os.homedir();
+    }
+    if (normalized === 'configHome') {
+        return process.env.XDG_CONFIG_HOME?.trim() || path.join(os.homedir(), '.config');
+    }
+    if (normalized === 'codexHome') {
+        return process.env.CODEX_HOME?.trim() || path.join(os.homedir(), '.codex');
+    }
+    if (normalized === 'claudeHome') {
+        return process.env.CLAUDE_CONFIG_DIR?.trim() || path.join(os.homedir(), '.claude');
+    }
+    return undefined;
+}
+function resolveOpenClawGlobalSkillsDir() {
+    const homeDir = os.homedir();
+    const candidates = ['.openclaw', '.clawdbot', '.moltbot'];
+    for (const candidate of candidates) {
+        const candidateDir = path.join(homeDir, candidate);
+        if (fs.existsSync(candidateDir)) {
+            return path.join(candidateDir, 'skills');
+        }
+    }
+    return path.join(homeDir, '.openclaw', 'skills');
 }
 function normalizeSlashes(value) {
     return value.replace(/\\/g, '/');

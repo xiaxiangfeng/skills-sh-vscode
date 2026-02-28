@@ -11,6 +11,9 @@
         v-bind="getItemProps(item, index)"
         @click-title="$emit('click-item', item)"
       >
+        <template #details>
+          <slot name="details" :item="item" :index="index"></slot>
+        </template>
         <template #actions>
           <slot name="actions" :item="item" :index="index"></slot>
         </template>
@@ -37,6 +40,9 @@
             v-bind="getItemProps(item, index)"
             @click-title="$emit('click-item', item)"
           >
+            <template #details>
+              <slot name="details" :item="item" :index="index"></slot>
+            </template>
             <template #actions>
               <slot name="actions" :item="item" :index="index"></slot>
             </template>
@@ -63,7 +69,10 @@ const props = defineProps<{
   groups?: Group[];
   header?: string;
   variant: 'marketplace' | 'installed';
-  itemMapper?: (item: MarketplaceSkill | InstalledSkill, index: number) => { title: string; subtitle: string; meta: string };
+  itemMapper?: (
+    item: MarketplaceSkill | InstalledSkill,
+    index: number
+  ) => { title: string; subtitle: string; meta: string; titleClickable?: boolean };
 }>();
 
 defineEmits<{
@@ -99,14 +108,16 @@ function getItemProps(item: MarketplaceSkill | InstalledSkill, index: number) {
     return {
       title: skill.name,
       subtitle: skill.repo,
-      meta: `#${index + 1} - ${skill.installs || 'N/A'}`
+      meta: `#${index + 1} - ${skill.installs || 'N/A'}`,
+      titleClickable: true
     };
   } else {
     const skill = item as InstalledSkill;
     return {
       title: skill.name,
       subtitle: skill.description || 'No description',
-      meta: formatDate(skill.updatedAt)
+      meta: formatDate(skill.updatedAt),
+      titleClickable: false
     };
   }
 }
